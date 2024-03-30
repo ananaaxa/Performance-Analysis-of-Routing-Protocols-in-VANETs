@@ -15,8 +15,31 @@ A .osm file should be downloaded.
 
 # ZRP and LAR patch
 These hybrid protocols are not inbuilt in the NS2 module. The patch has to be manually downloaded. 
-## ZRP
+1) ZRP
 ```
 cd ns-allinone-2.35/
 patch -p0 < zrp-ns235.patch
 ```
+```
+./install
+cd ns-2.35/
+cp ns ns-zrp
+sudo cp ns-zrp /usr/local/bin/
+cd ../nam-1.15/
+sudo make install
+```
+2) LAR 
+```
+cd ns-allinone-2.35/
+patch -p0 < LAR-dream__ns235.patch
+```
+```
+./install
+cd ns-2.35/
+cp ns ns235-lar
+sudo cp ns235-lar /usr/local/bin/
+```
+
+#Protocols Execution
+1) AODV
+   
