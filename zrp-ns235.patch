@@ -1,0 +1,4327 @@
+diff -Naur ns-2.35-orig/common/packet.h ns-2.35/common/packet.h
+--- ns-2.35-orig/common/packet.h	2010-05-10 00:28:41.000000000 +0200
++++ ns-2.35/common/packet.h	2014-11-23 15:34:29.272156462 +0100
+@@ -67,6 +67,7 @@
+ #define HDR_TORA(p)     (hdr_tora::access(p))
+ #define HDR_IMEP(p)     (hdr_imep::access(p))
+ #define HDR_CDIFF(p)    (hdr_cdiff::access(p))  /* chalermak's diffusion*/
++#define HDR_ZRP(p)      (hdr_zrp::access(p))	// [CHANGE-1(for_ZRP-AGENT) : Lines#1]
+ //#define HDR_DIFF(p)     (hdr_diff::access(p))  /* SCADD's diffusion ported into ns */
+ #define HDR_LMS(p)		(hdr_lms::access(p))
+ 
+@@ -198,9 +199,11 @@
+ 
+         // M-DART packets
+ static const packet_t PT_MDART = 72;
++
++static const packet_t PT_ZRP = 73; // [CHANGE-2(for_ZRP-AGENT) : Lines#2]
+ 	
+         // insert new packet types here
+-static packet_t       PT_NTYPE = 73; // This MUST be the LAST one
++static packet_t       PT_NTYPE = 74; // This MUST be the LAST one
+ 
+ enum packetClass
+ {
+@@ -325,7 +328,8 @@
+ 		name_[PT_CtrMcast_Encap]= "CtrMcast_Encap";
+ 		name_[PT_CtrMcast_Decap]= "CtrMcast_Decap";
+ 		name_[PT_SRM]= "SRM";
+-	
++ 		name_[PT_ZRP]= "ZRP";// [CHANGE-3(for_ZRP-AGENT) : Lines#1]	
++
+ 		name_[PT_REQUEST]= "sa_req";	
+ 		name_[PT_ACCEPT]= "sa_accept";
+ 		name_[PT_CONFIRM]= "sa_conf";
+diff -Naur ns-2.35-orig/Makefile.in ns-2.35/Makefile.in
+--- ns-2.35-orig/Makefile.in	2014-10-18 01:50:36.000000000 +0200
++++ ns-2.35/Makefile.in	2014-11-23 15:31:19.288039451 +0100
+@@ -53,7 +53,7 @@
+ # for diffusion
+ #DIFF_INCLUDES = "./diffusion3/main ./diffusion3/lib ./diffusion3/nr ./diffusion3/ns"
+ 
+-CCOPT	= @V_CCOPT@ 
++CCOPT	= -Wall 
+ STATIC	= @V_STATIC@
+ #LDFLAGS	= $(STATIC)
+ LDFLAGS	= @LDFLAGS@ 
+@@ -263,6 +263,7 @@
+ 	mac/mac-simple.o \
+ 	satellite/sat-hdlc.o \
+ 	dsdv/dsdv.o dsdv/rtable.o queue/rtqueue.o \
++	zrp/zrp.o \
+ 	routing/rttable.o \
+ 	imep/imep.o imep/dest_queue.o imep/imep_api.o \
+ 	imep/imep_rt.o imep/rxmit_queue.o imep/imep_timers.o \
+diff -Naur ns-2.35-orig/tcl/lib/ns-agent.tcl ns-2.35/tcl/lib/ns-agent.tcl
+--- ns-2.35-orig/tcl/lib/ns-agent.tcl	2009-01-15 07:23:49.000000000 +0100
++++ ns-2.35/tcl/lib/ns-agent.tcl	2014-11-23 15:31:19.288039451 +0100
+@@ -197,3 +197,9 @@
+ Agent/AOMDV set dport_   0
+ Agent/AOMDV set aomdv_prim_alt_path_len_diff_ 1
+ Agent/AOMDV set aomdv_max_paths_ 3
++
++Agent/ZRP instproc init args {  # [CHANGE-4(for_ZRP-AGENT) : Lines#4]	 
++ 	 $self next $args
++}
++Agent/ZRP set sport_   0
++Agent/ZRP set dport_   0
+diff -Naur ns-2.35-orig/tcl/lib/ns-default.tcl ns-2.35/tcl/lib/ns-default.tcl
+--- ns-2.35-orig/tcl/lib/ns-default.tcl	2010-07-04 00:45:45.000000000 +0200
++++ ns-2.35/tcl/lib/ns-default.tcl	2014-11-23 15:31:19.289039480 +0100
+@@ -1343,6 +1343,12 @@
+ # Routing protocol agents
+ Agent/Mcast/Control set packetSize_ 80
+ 
++# [CHANGE-5(for_ZRP-AGENT) : Lines#3]
++Agent/ZRP set packetSize_ 100  			
++#Agent/ZRP set sport_ 0
++#Agent/ZRP set dport_ 0
++
++
+ # Dynamic routing defaults
+ Agent/rtProto set preference_ 200		;# global default preference
+ Agent/rtProto/Direct set preference_ 100
+diff -Naur ns-2.35-orig/tcl/lib/ns-lib.tcl ns-2.35/tcl/lib/ns-lib.tcl
+--- ns-2.35-orig/tcl/lib/ns-lib.tcl	2010-05-10 00:28:41.000000000 +0200
++++ ns-2.35/tcl/lib/ns-lib.tcl	2014-11-23 15:31:19.289039480 +0100
+@@ -621,6 +621,10 @@
+ 		set ragent [$self $rtAgentFunction_ $node]
+ 	} else {
+ 		switch -exact $routingAgent_ {
++		# [CHANGE-6(for_ZRP-AGENT) : Lines#3]		
++	 	    ZRP  {		
++ 			    set ragent [$self create-zrp-agent $node]
++ 	    	    }
+ 		    DSDV {
+ 			    set ragent [$self create-dsdv-agent $node]
+ 		    }
+@@ -800,6 +804,14 @@
+ 	return $nodetype
+ }
+ 
++# [CHANGE-7(for_ZRP-AGENT) : Lines#6] 
++Simulator instproc create-zrp-agent { node } {
++        set ragent [new Agent/ZRP [$node id]]
++        $node set ragent_ $ragent
++	$self at 0.0 "$ragent start"    ;# start updates
++        return $ragent
++}
++
+ Simulator instproc create-tora-agent { node } {
+         set ragent [new Agent/TORA [$node id]]
+ 	$node set ragent_ $ragent
+diff -Naur ns-2.35-orig/tcl/lib/ns-packet.tcl ns-2.35/tcl/lib/ns-packet.tcl
+--- ns-2.35-orig/tcl/lib/ns-packet.tcl	2011-10-15 00:11:08.000000000 +0200
++++ ns-2.35/tcl/lib/ns-packet.tcl	2014-11-23 15:31:19.289039480 +0100
+@@ -179,6 +179,7 @@
+ 	MDART 	# routing protocol for ad-hoc networks
+ 	# AOMDV patch
+ 	AOMDV
++ 	ZRP     # [CHANGE-8(for_ZRP-AGENT) : Lines#1]
+ # Other:
+ 	Encap 	# common/encap.cc
+         IPinIP 	# IP encapsulation 
+diff -Naur ns-2.35-orig/trace/cmu-trace.cc ns-2.35/trace/cmu-trace.cc
+--- ns-2.35-orig/trace/cmu-trace.cc	2011-10-03 00:32:35.000000000 +0200
++++ ns-2.35/trace/cmu-trace.cc	2014-11-23 15:31:19.290039514 +0100
+@@ -57,6 +57,7 @@
+ #include <cmu-trace.h>
+ #include <mobilenode.h>
+ #include <simulator.h>
++#include <zrp/zrp.h>	// For ZRP
+ //<zheng: add for 802.15.4>
+ #include "wpan/p802_15_4pkt.h"
+ #include "wpan/p802_15_4trace.h"
+@@ -475,6 +476,74 @@
+ 
+ // Note:  HDLC format (format_hdlc()) has moved to satellite tracing
+ 
++// [CHANGE-8(for_ZRP-AGENT)]
++void
++ CMUTrace::format_zrp(Packet *p, int offset)
++ {
++         struct hdr_cmn *ch = HDR_CMN(p);
++ 	struct hdr_ip *ih = HDR_IP(p);
++	struct hdr_zrp *hdrz = HDR_ZRP(p);
++
++	char pktType[20];
++	switch(hdrz->zrptype_) {
++		case 0: // NDP_BEACON
++			strcpy(pktType, "NDP_BEACON");
++		break;
++		case 1: // NDP_BEACON_ACK
++			strcpy(pktType, "NDP_BEACON_ACK");
++		break;
++		case 2: // IARP_UPDATE
++			strcpy(pktType, "IARP_UPDATE");
++		break;
++		case 3: // IARP_DATA
++			strcpy(pktType, "IARP_DATA");
++		break;
++		case 4: // IERP_REPLY
++			strcpy(pktType, "IERP_REPLY");
++		break;
++		case 5: // IERP_REQUEST
++			strcpy(pktType, "IERP_REQUEST");
++		break;
++		case 6: // IERP_ROUTE_ERROR
++			strcpy(pktType, "IERP_ROUTE_ERROR");
++		break;
++		case 7: // IERP_DATA
++			strcpy(pktType, "IERP_DATA");
++		break;
++		default: // Invalid Packet
++			strcpy(pktType, "INVALID");
++		break;	
++	}
++ 	
++ 	// hack the IP address to convert pkt format to hostid format
++ 	// for now until port ids are removed from IP address. -Padma.
++ 	int src = Address::instance().get_nodeaddr(ih->saddr());
++ 	int dst = Address::instance().get_nodeaddr(ih->daddr());
++ 
++ 	if (pt_->tagged()) {
++ 		// Need to determine tag names for this data
++ 		//sprintf(pt_->buffer() + offset,
++ 		//	"",
++ 		//	);
++ 	} else if (newtrace_) {
++ 	    sprintf(pt_->buffer() + offset,
++		    "-Zsrc %d -Zdst %d -Ztyp %s -Zseq %d -Zqid %d -Zlbc %d ",
++		    hdrz->src_,			// ZRP Source
++		    hdrz->dest_,		// ZRP Destination
++		    pktType,			// Packet-Type
++		    hdrz->seq_,			// Sequence Number
++		    hdrz->queryID_,		// Query ID
++		    hdrz->lastbc_);		// Last Bordercaster
++ 	} else {
++ 	    sprintf(pt_->buffer() + offset, "------- [%d:%d %d:%d %d %d] ",
++ 		src, ih->sport(),
++ 		dst, ih->dport(),
++ 		ih->ttl_, (ch->next_hop_ < 0) ? 0 : ch->next_hop_);
++ 	}
++ }
++
++
++
+ void
+ CMUTrace::format_arp(Packet *p, int offset)
+ {
+@@ -1435,6 +1504,11 @@
+ 		case PT_DSR:
+ 			format_dsr(p, offset);
+ 			break;
++		// pgi - added for ZRP  // [CHANGE-9(for_ZRP-AGENT) : Lines#5] 
++ 		case PT_ZRP:
++ 			format_zrp(p, offset);
++ 			break;
++ 		// pgi - added for ZRP
+ 		case PT_MESSAGE:
+ 		case PT_UDP:
+ 			format_msg(p, offset);
+diff -Naur ns-2.35-orig/trace/cmu-trace.h ns-2.35/trace/cmu-trace.h
+--- ns-2.35-orig/trace/cmu-trace.h	2010-05-10 00:28:41.000000000 +0200
++++ ns-2.35/trace/cmu-trace.h	2014-11-23 15:31:19.290039514 +0100
+@@ -149,6 +149,8 @@
+ 	void    format_smac(Packet *p, int offset);
+ 	void	format_ip(Packet *p, int offset);
+ 
++//	[CHANGE-11(for_ZRP-AGENT) : Lines#1] 
++	void	format_zrp(Packet *p, int offset); // pgi added for zrp
+ 	void	format_arp(Packet *p, int offset);
+ 	void    format_hdlc(Packet *p, int offset);
+ 	void	format_dsr(Packet *p, int offset);
+diff -Naur ns-2.35-orig/zrp/constants.h ns-2.35/zrp/constants.h
+--- ns-2.35-orig/zrp/constants.h	1970-01-01 01:00:00.000000000 +0100
++++ ns-2.35/zrp/constants.h	2014-11-23 15:31:19.290039514 +0100
+@@ -0,0 +1,61 @@
++#ifndef _constants_h_
++#define _constants_h_
++
++// General OR Common Constants
++#define DEBUG				0	// 1 = Enabled; 0 = Disabled
++#define ROUTER_PORT      		0xff
++#define TRUE 				1
++#define FALSE 				0
++#define LINKUP 				1
++#define LINKDOWN 			0
++#define DEFAULT_STARTUP_JITTER 		1	// 1sec
++#define DEFAULT_EXPIRATION_CHECK_PERIOD 1 	// 1sec... 
++#define MAX_SEQUENCE_ID 		1000000 // For Packet Utils
++#define MIN_PACKET_DROP_TIME		3	// 3 sec For 1-hop communication	[Not Used]
++#define MAX_PACKET_DROP_TIME		10	// 10 sec For multi-hop communication	[Not Used]
++#define IERP_TTL			50	// Maximum-length for IERP route
++
++// NDP related Constants
++#define DEFAULT_BEACON_PERIOD 		3 	// 3 sec
++#define DEFAULT_BEACON_PERIOD_JITTER	1 	// 1 sec
++#define DEFAULT_NEIGHBOR_ACK_TIMEOUT  	2 	// 2 sec  [Within this much time ACK should come to me]
++#define DEFAULT_MAX_ACK_TIMEOUT		2	// How many ACK Timeout is needed to declare a Neighbor DOWN
++
++// IARP related Constants
++#define DEFAULT_MIN_IARP_UPDATE_PERIOD 	3 	// 3 sec  [T_lsu]
++#define DEFAULT_MAX_IARP_UPDATE_PERIOD 	10 	// 10 sec [T_lsu]
++#define DEFAULT_LINK_LIFETIME 		10	// 10sec	
++#define DEFAULT_UPDATE_LIFETIME 	30	// 30sec  [For Control Flooding]
++
++// IERP related Constants
++#define DEFAULT_BRP_XMIT_POLICY		0	// 1: BRP_MULTICAST, 0: BRP_UNICAST
++#define IERP_REPLY_SNOOP		1	// 1: Enabled, 0: Disabled
++#define IERP_ERROR_SNOOP		1	// 1: Enabled, 0: Disabled
++#define IERP_XMIT_JITTER		1	// 1sec [Uniformly distributed]
++#define DEFAULT_QUERY_LIFETIME 		30 	// 30sec  [For Control Flooding]
++#define DEFAULT_QUERY_RETRY_TIME	5	// 5sec
++#define DEFAULT_ROUTE_LIFETIME 		120	// 120sec  [IERP Route Reliability]
++#define DEFAULT_MAX_IERP_REPLY		3	// Destination can send maximum 5 replies...
++
++// ZRP related Constants
++#define ZRP_DEFAULT_HDR_LEN		10	// 10 bytes [refer to hdr_zrp struct]
++#define DEFAULT_ZONE_RADIUS 		2
++#define DEFAULT_SEND_BUFFER_SIZE	100	// 100 Packets
++#define DEFAULT_PACKET_LIFETIME		20	// 10 sec
++#define	DEFAULT_INTERPKT_JITTER		1	// 1sec [Uniformly distributed]
++
++// Type-Defintions & Enumeration...
++typedef double Time;   
++typedef int32_t Query_ID;
++
++// Types of ZRP packets...
++enum ZRPTYPE {
++  	NDP_BEACON, NDP_BEACON_ACK, IARP_UPDATE, IARP_DATA, IERP_REPLY, IERP_REQUEST, IERP_ROUTE_ERROR, IERP_DATA
++};
++
++// BRP Xmit Policy...
++enum BRP_XMIT_POLICY {
++	BRP_UNICAST, BRP_MULTICAST
++};
++
++#endif
+diff -Naur ns-2.35-orig/zrp/zrp.cc ns-2.35/zrp/zrp.cc
+--- ns-2.35-orig/zrp/zrp.cc	1970-01-01 01:00:00.000000000 +0100
++++ ns-2.35/zrp/zrp.cc	2014-11-23 15:31:19.293039620 +0100
+@@ -0,0 +1,3094 @@
++#include "zrp.h"
++
++/* [SECTION-1]--------------------------------------------------------------------------------------------------------------
++ * NDP (NEIGHBOR DISCOVERY PROTOCOL):- SUBSECTIONS CONTAINS FOLLOWING THINGS:
++ *	1) NEIGHBOR-LIST 		(Neighbor Table)
++ *	2) BEACON-TRANSMIT TIMER	(Periodic Beacon Xmission)
++ *	3) ACK-TIMEOUT TIMER		(ACK-Timeout Checking)
++ *	4) NDP AGENT			(Neighbor Discovery Agent)
++ * -------------------------------------------------------------------------------------------------------------------------
++ * [SUB-SECTION-1.1]--------------------------------------------------------------------------------------------------------
++ * NEIGHBOR-LIST:- NEIGHBOR TABLE AND ASSOCIATED FUNCTIONS
++ * -------------------------------------------------------------------------------------------------------------------------
++ */
++/* Add the Neighbor at the head. */
++void
++NeighborList::addNeighbor(nsaddr_t addr, Time lastack, int linkStatus) {
++	Neighbor *newNb = new Neighbor(addr, lastack, linkStatus);	// Create a new Neighbor
++	if(newNb == NULL) {				// Check for Allocation Error
++		printf("### Memory Allocation Error in [NeighborList::addNeighbor] ###");
++		exit(0);
++	}
++	newNb->next_ = head_;	// Make necessary Joinings	
++	head_ = newNb;
++	numNeighbors_++;	// Increment Number of Neighbors
++}
++
++/* Find the Neighbor and 1)send TRUE & the handle OR 2)send FALSE. */
++int
++NeighborList::findNeighbor(nsaddr_t addr, Neighbor **handle) {
++	Neighbor *cur = NULL;
++	int foundFlag;
++	
++	// [i<numNeighbors_] condition takes care for EMPTY List case...
++	cur=head_;
++	foundFlag=FALSE;
++	for(int i=0; i<numNeighbors_; i++) {
++		if(addr == cur->addr_) {
++			foundFlag = TRUE;
++			break;
++		}
++		cur=cur->next_;
++	}
++	
++	if(foundFlag) {		// If Neighbor is Found
++		*handle = cur;	// ...Return the handle of that Neighbor
++		return TRUE;	// ...Return Found = TRUE		
++	}
++
++	return FALSE;		// Neighbor is NOT found (returning FALSE)
++}
++
++/* Send TRUE if Neighbor-list is EMPTY else send FALSE. */
++int
++NeighborList::isEmpty() {
++	if(numNeighbors_ == 0) {
++		return TRUE;
++	} else {
++		return FALSE;
++	}
++}
++
++/* Remove a Neighbor specified by the pointer in argument. */
++void 
++NeighborList::removeNeighbor(Neighbor *prev, Neighbor *toBeDeleted) {
++	// [Case-1]: This is a head that needs to be deleted
++	if(prev == NULL ) {	
++		if(toBeDeleted != head_) {
++			printf("### Logical Error in [NeighborList::removeNeighbor] ###");
++			exit(0);
++		}
++		head_ = head_->next_;
++		delete toBeDeleted;
++		numNeighbors_--;	// Decrement Number of Neighbors
++		return;
++	}
++
++	// [Case-2]: Normal Case
++	prev->next_ = toBeDeleted->next_; // Make necessary Joinings
++	delete toBeDeleted;
++	numNeighbors_--;	// Decrement Number of Neighbors
++}
++
++/* Remove all Neighbors for which the linkStatus_ is DOWN. */
++void 
++NeighborList::purgeDownNeighbors() {
++	if(numNeighbors_ == 0) {
++		return;		// Nothing to do
++	}
++	// [case-1]: Leaving the 1st case(head_ case)
++	Neighbor *prev, *cur, *toBeDeleted;
++	prev = head_;
++	cur = head_->next_;
++	for(;cur!=NULL;) {
++		if(cur->linkStatus_ == LINKDOWN) {	// Delete the Neighbor
++			prev->next_ = cur->next_;
++			toBeDeleted = cur;
++			cur = cur->next_;
++			delete toBeDeleted;
++			numNeighbors_--;		// Decrement Number of Neighbors
++		} else {
++			prev = cur;		// Advance the Pointers
++			cur = cur->next_;				
++		}
++	}
++	// [case-2]: head_ case...
++	if(head_!=NULL) {
++		if(head_->linkStatus_ == LINKDOWN) {
++			toBeDeleted = head_;
++			head_ = head_->next_;
++			delete toBeDeleted;
++			numNeighbors_--;		// Decrement Number of Neighbors
++		}
++	}
++}
++
++/*  Delete the whole-list. */
++void 
++NeighborList::freeList() {
++	if(numNeighbors_ == 0) {
++		return;
++	}
++	Neighbor *toBeDeleted, *cur = NULL;	
++	// [i<numNeighbors_] condition takes care for EMPTY List case...
++	cur = head_;
++	for(int i=0; i<numNeighbors_; i++) {
++		toBeDeleted = cur;
++		cur = cur->next_;
++		delete toBeDeleted;
++	}
++	head_ = NULL;		// Reset the attributes...
++	numNeighbors_ = 0;	// Reset the attributes...
++}
++
++/* Print all Neighbors to the console. */
++void
++NeighborList::printNeighbors() {
++	// Print current Neighbor-Table
++	printf("Neighbors:[");
++	if(numNeighbors_ == 0) {
++		printf("EMPTY]");
++		return;	
++	}
++
++	Neighbor *curNb = NULL;
++	curNb = head_;
++	printf("(Up: ");
++	for(int i=0; i<numNeighbors_; i++) {
++		if(curNb->linkStatus_ == LINKUP) {
++			printf("%d ",curNb->addr_);
++		}
++		curNb = curNb->next_;
++	}
++	printf("),(Down: ");
++
++	curNb = head_;
++	for(int i=0; i<numNeighbors_; i++) {
++		if(curNb->linkStatus_ == LINKDOWN) {
++			printf("%d ",curNb->addr_);
++		}
++		curNb = curNb->next_;
++	}
++	printf(")]");
++}
++
++
++
++
++
++/* [SUB-SECTION-1.2]--------------------------------------------------------------------------------------------------------
++ * BEACON-TRANSMIT TIMER:- PERIODIC BEACON XMISSION
++ * -------------------------------------------------------------------------------------------------------------------------
++ */
++/* Starts BeaconTransmitTimer, called by startUp(), delayed by 'thistime'. */
++void 
++NDPBeaconTransmitTimer::start(double thistime) {
++	Scheduler::instance().schedule(this, &intr_, thistime );
++}
++
++/* Broadcasts a Beacon. */
++void 
++NDPBeaconTransmitTimer::handle(Event* e) {
++	// [Task-1]: Create and broadcast a beacon.
++	Packet* p = NULL;
++	p = (agent_->pktUtil_).pkt_create(NDP_BEACON, IP_BROADCAST, 1); // last arg is TTL=1
++	(agent_->pktUtil_).pkt_broadcast(p, 0.00); 			// broadcast pkt
++					if(DEBUG) { // [Log: XMIT_NDP_BEACON]
++					Time now = Scheduler::instance().clock(); // get the time
++					hdr_zrp *hdrz = HDR_ZRP(p); 		  // access ZRP part of pkt header
++					printf("\n_%d_ [%6.6f] | XMIT_NDP_BEACON | -S %d -Nb BROADCAST | -SEQ %d | ",
++					agent_->myaddr_, now, hdrz->src_, hdrz->seq_);
++					agent_->print_tables(); printf("\n");
++					} // [Log: End]
++	// [Task-2]: Start the ACK timer...
++	(agent_->ndpAgt_).AckTimer_.start();
++	// [Task-3]: Schedule next scan in BEACON_PERIOD + Jitter sec
++  	Scheduler::instance().schedule(this, &intr_, beacon_period_ + Random::uniform(beacon_period_jitter_));
++}
++
++
++
++
++
++/* [SUB-SECTION-1.3]--------------------------------------------------------------------------------------------------------
++ * ACK-TIMEOUT TIMER:- ACK-TIMEOUT CHECKING
++ * -------------------------------------------------------------------------------------------------------------------------
++ */
++/* Schedule timeout at neighbor_ack_timeout_, just after sending a Beacon. */
++void 
++NDPAckTimer::start() {
++	Scheduler::instance().schedule(this, &intr_, neighbor_ack_timeout_);
++}
++
++/* Mark LINKDOWN for un-ACKed neighbors. If any of them found DOWN then notify IARP to rebuild routing table. */
++void 
++NDPAckTimer::handle(Event* e) {
++	// [Task-1]: Check if Neighbor Table is Empty...
++	if((agent_->ndpAgt_).neighborLst_.isEmpty()) {
++					if(DEBUG) { // [Log: NDP_ISOLATED_NODE ]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | NDP_ISOLATED_NODE | No NDP_BEACON_ACK Detected | ",
++					agent_->myaddr_, now); agent_->print_tables(); printf("\n");
++					} // [Log: End]
++		return;
++	}
++	// [Task-2]: Drop timed-out neighbors & inform IARP about it...
++	Time now = Scheduler::instance().clock(); // get the time
++	Neighbor *prev, *curNb; 
++	prev = NULL;	// Must be NULL
++	curNb = (agent_->ndpAgt_).neighborLst_.head_;
++	for(; curNb!=NULL; ) {
++		// [SubTask-2.1]: Check for Ack Timeout of Neighbor
++		if((now - curNb->lastack_) > neighbor_ack_timeout_) {
++		// [SubTask-2.2]: Check for How many TimeOuts have occured with this Neighbor
++			curNb->AckTOCount_++;
++			if(curNb->AckTOCount_ >= DEFAULT_MAX_ACK_TIMEOUT) {
++		// [SubTask-2.3]: Detected a DOWN Neighbor - Notify IARP & Take appropriate actions		
++				(agent_->iarpAgt_).updateSendFlag_ = TRUE; // Set the Update at Next Timer-Event 
++				LinkState *handleToFoundLS = NULL;
++				int foundFlag;
++				foundFlag = (agent_->iarpAgt_).lsLst_.findLink(curNb->addr_, agent_->myaddr_, &handleToFoundLS);
++				if( foundFlag == TRUE ) { 
++					handleToFoundLS->isup_ = LINKDOWN;	  // Set the link-stauts = DOWN 
++					(agent_->iarpAgt_).buildRoutingTable();	  // Rebuild Routing Table
++				}
++		// [SubTask-2.4]: Set the Link-Status of Neighbor to LINKDOWN...
++		//		  [DOWN Neighbors are deleted after sending IARP_UPDATE - I didn't forget that :) ]
++				curNb->linkStatus_ = LINKDOWN;
++			}
++					if(DEBUG) { // [Log: NDP_BEACON_ACK_TIMEOUT]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | NDP_BEACON_ACK_TIMEOUT | -S %d -Nb %d | -TimeOut %d | ",
++					agent_->myaddr_, now, agent_->myaddr_, curNb->addr_, neighbor_ack_timeout_);	
++					agent_->print_tables(); printf("\n");
++					} // [Log: End]		
++		}
++		prev = curNb;		// Advance the Pointers	
++		curNb=curNb->next_;
++	}
++}
++
++
++
++
++
++/* [SUB-SECTION-1.4]--------------------------------------------------------------------------------------------------------
++ * NDP AGENT:- NEIGHBOR DISCOVERY AGENT
++ * -------------------------------------------------------------------------------------------------------------------------
++ */
++/* Start the Beacon-Xmit Timer and clear all the lists. */
++/*!	\fn void NDPAgent::startUp()
++	
++	This is called by ZRPAgent::startUp() method. It does following tasks: \n
++	1) Starts the Beacon-Transmit-Timer. \n
++	2) Clears the Neighbor-List.
++ */
++void
++NDPAgent::startUp() {
++	// [Task-1]: Start the Timers... [We donot need to start ACK timer- It is started by BTTimer]
++	double startUpJitter;
++  	startUpJitter =  Random::uniform(startup_jitter_);
++	BeaconTransmitTimer_.start(startUpJitter);	
++	
++	// [Task-2]: Clear the NeighborList...
++	if(!neighborLst_.isEmpty()) {
++		neighborLst_.freeList();
++	}
++}
++
++/* On receiving a Beacon, Send an ACK to the Sender. */
++void
++NDPAgent::recv_NDP_BEACON(Packet* p) {
++	// [Assumption]:We are looking only for symmetric links. 
++	//		On receving NDP_BEACON, I donot consider the sender as a Neighbor.
++					if(DEBUG) { // [Log: RECV_NDP_BEACON]
++					Time now = Scheduler::instance().clock(); // get the time
++					hdr_zrp *hdrz = HDR_ZRP(p); 		// access ZRP part of pkt header
++					printf("\n_%d_ [%6.6f] | RECV_NDP_BEACON | -S %d -Nb %d | -SEQ %d | ",
++					agent_->myaddr_, now, hdrz->src_, agent_->myaddr_, hdrz->seq_);	
++					agent_->print_tables(); printf("\n");
++					} // [Log: End]
++	// [Task-1]: Create an ACK packet and Send it...
++	Packet *pnew = NULL;
++  	hdr_zrp *hdrz = HDR_ZRP(p);
++	pnew = (agent_->pktUtil_).pkt_create(NDP_BEACON_ACK, hdrz->src_, 1);
++	(agent_->pktUtil_).pkt_send(pnew, hdrz->src_, 0.00);	// Unicast the packet
++					if(DEBUG) { // [Log: XMIT_NDP_BEACON_ACK]
++					Time now = Scheduler::instance().clock(); // get the time
++					hdr_zrp *hdrznew = HDR_ZRP(pnew); 	// access ZRP part of pkt header
++					printf("\n_%d_ [%6.6f] | XMIT_NDP_BEACON_ACK | -S %d -Nb %d | -SEQ %d | ",
++					agent_->myaddr_, now, hdrznew->dest_, hdrznew->src_, hdrznew->seq_);	
++					agent_->print_tables(); printf("\n");
++					} // [Log: End]
++	// [Task-2]: Drop the NDP_BEACON just Received...
++	(agent_->pktUtil_).pkt_drop(p);
++}
++
++/* On receiving ACK, Update the Neighbor-table and IARP-(topology & routing)-table if required. */
++void 
++NDPAgent::recv_NDP_BEACON_ACK(Packet* p) {
++	// [Task-1]: Check if Neighbor exists - If not, add it & Notify IARP...
++	Time now = Scheduler::instance().clock(); 	// get the time
++	hdr_zrp *hdrz = HDR_ZRP(p);
++	Neighbor *handleToFoundNb = NULL;
++	int foundNeighbor = neighborLst_.findNeighbor(hdrz->src_, &handleToFoundNb);
++	if(foundNeighbor == TRUE) {
++					if(DEBUG) { // [Log: RECV_NDP_BEACON_ACK]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | RECV_NDP_BEACON_ACK | -S %d -Nb %d | -SEQ %d | "
++					"Existing Neighbor Detected | ",
++					agent_->myaddr_, now, hdrz->dest_, hdrz->src_, hdrz->seq_);	
++					agent_->print_tables(); printf("\n");
++					} // [Log: End]
++		handleToFoundNb->lastack_ = now;	// Update the ACK Received Time
++		handleToFoundNb->linkStatus_ = LINKUP;	// Update the Link-State to up
++		handleToFoundNb->AckTOCount_ = 0;	// Update the Ack TimeOut Count to zero	
++	} else { // Not Found..Means..New Neighbor detected	
++					if(DEBUG) { // [Log: RECV_NDP_BEACON_ACK]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | RECV_NDP_BEACON_ACK | -S %d -Nb %d | -SEQ %d | "
++					"New Neighbor Detected | ",
++					agent_->myaddr_, now, hdrz->dest_, hdrz->src_, hdrz->seq_);	
++					agent_->print_tables(); printf("\n");
++					} // [Log: End]
++		neighborLst_.addNeighbor(hdrz->src_, now, LINKUP);
++		// Notify IARP to send the next Update [Change of Neighbor-Table Detected]
++ 		(agent_->iarpAgt_).updateSendFlag_ = TRUE; // Set the Update at Next Timer-Event	
++	}
++
++	// [Task-2]: Update IARP...	
++	LinkState *handleToFoundLS = NULL;
++	int LSFoundFlag = (agent_->iarpAgt_).lsLst_.findLink(hdrz->src_, agent_->myaddr_, &handleToFoundLS);
++	if( LSFoundFlag == FALSE ) { 
++		(agent_->iarpAgt_).lsLst_.addLink(hdrz->src_, agent_->myaddr_, hdrz->seq_, 	// Add new link
++							LINKUP, now+(agent_->iarpAgt_).linkLifeTime_);
++		(agent_->iarpAgt_).buildRoutingTable();	  // Rebuild Routing Table
++		agent_->route_SendBuffer_pkt();	// Send Buffered packets...
++	} else {	// Link is Found... [Update the attributes]
++		handleToFoundLS->isup_ = LINKUP;
++		handleToFoundLS->expiry_ = now+(agent_->iarpAgt_).linkLifeTime_;
++	}
++
++	// [Task-3]: Drop the packet...
++	(agent_->pktUtil_).pkt_drop(p);
++}
++
++void 
++NDPAgent::print_tables() {
++	// Print all Neighbors...
++	neighborLst_.printNeighbors();
++}
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++/* [SECTION-2]--------------------------------------------------------------------------------------------------------------
++ * IARP (INTRA-ZONE ROUTING PROTOCOL):- SUBSECTIONS CONTAINS FOLLOWING THINGS:
++ *	1) LINKSTATE LIST 		(Topology Table)
++ *	2) PERIPHERAL-NODE LIST		(Peripheral-Node Table)
++ *	3) INNER-ROUTE LIST		(Inner-Route Table)
++ *	4) UPDATE-DETECT LIST		(Update-detect Cache)
++ *	5) PERIODIC-UPDATE TIMER	(Periodic Update Xmission)
++ *	6) EXPIRATION-CHECK TIMER	(For Expiration of LinkState and Routes)
++ *	7) IARP AGENT			(IntrA-Zone Routing Agent)
++ * -------------------------------------------------------------------------------------------------------------------------
++ * [SUB-SECTION-2.1]--------------------------------------------------------------------------------------------------------
++ * LINKSTATE LIST:- TOPOLOGY TABLE
++ * -------------------------------------------------------------------------------------------------------------------------
++ */
++/* 1. Add LinkState at the head. */
++void 
++LinkStateList::addLink(nsaddr_t src, nsaddr_t dest, int seq, int isup, Time expiry) {
++	LinkState *newLS = new LinkState(src, dest, seq, isup, expiry);	// Create a new LinkState
++	if(newLS == NULL) {	// Check for Allocation Error
++		printf("### Memory Allocation Error in [LinkStateList::addLink] ###");
++		exit(0);
++	}
++	newLS->next_ = head_;	// Made necessary Joinings			
++	head_ = newLS;
++	numLinks_++;		// Increment Number of Links
++}
++
++/* 2. Find the Link and 1)send TRUE & the handle OR 2)send FALSE. */
++int 
++LinkStateList::findLink(nsaddr_t src, nsaddr_t dest, LinkState **handle) {
++	LinkState *cur;
++	int foundFlag;
++	
++	// [i<numLinks_] condition takes care for EMPTY List case...
++	cur = head_;
++	foundFlag = FALSE;
++	for(int i=0; i<numLinks_; i++) {
++		if((src==cur->src_ && dest==cur->dest_) || (src==cur->dest_ && dest==cur->src_)) {
++			foundFlag = TRUE;
++			break;
++		}
++		cur=cur->next_;
++	}
++	
++	if(foundFlag == TRUE) {	// If LinkState is Found
++		*handle = cur;	// ...Return the handle of that LinkState
++		return TRUE;	// ...Return Found = TRUE		
++	}
++
++	return FALSE;		// LinkState is NOT found (returning FALSE)
++}
++
++/* 3. Check if List is EMPTY or NOT. */
++int 
++LinkStateList::isEmpty() {
++	if(numLinks_ == 0) {
++		return TRUE;
++	} else {
++		return FALSE;
++	}
++}
++
++/* 4. Remove the link pointed by the argument passed. */
++void 
++LinkStateList::removeLink(LinkState *prev, LinkState *toBeDeleted) {
++	// [Case-1]: This is a head that needs to be deleted
++	if(prev == NULL ) {	
++		if(toBeDeleted != head_) {
++			printf("### Logical Error in [LinkStateList::removeLink] ###");
++			exit(0);
++		}
++		head_ = head_->next_;
++		delete toBeDeleted;
++		numLinks_--;	// Decrement Number of Links
++		return;
++	}
++	
++	// [Case-2]: Normal Case
++	prev->next_ = toBeDeleted->next_;
++	delete toBeDeleted;
++	numLinks_--;	// Decrement Number of Links
++}
++
++/* 5. Remove all Links for which the lifetime is expired. */
++int 
++LinkStateList::purgeLinks() {
++	int numPurgedLinks=0;
++	if(numLinks_ == 0) {
++		return numPurgedLinks;	// Nothing to do
++	}
++	// [case-1]: Leaving the 1st case(head_ case)
++	LinkState *prev, *cur;
++	prev = head_;
++	cur = head_->next_;
++  	Time now = Scheduler::instance().clock(); 	// get the time
++	for(int i=1; cur!=NULL; i++) {
++		if(cur->expiry_<now || cur->isup_==LINKDOWN) { // Delete the LinkState
++			prev->next_ = cur->next_;
++			LinkState *toBeDeleted = cur;
++			cur = cur->next_;
++			delete toBeDeleted;
++			numLinks_--;		// Decrement Number of Links
++			numPurgedLinks++;
++		} else {
++			prev = cur;		// Advance the Pointers
++			cur = cur->next_;				
++		}
++	}
++	
++	// [case-2]: head_ case...
++	if(head_!=NULL) {
++		if(head_->expiry_<now || head_->isup_==LINKDOWN) {
++			LinkState *toBeDeleted = head_;
++			head_ = head_->next_;
++			delete toBeDeleted;
++			numLinks_--;		// Decrement Number of Links
++			numPurgedLinks++;
++		}
++	}
++
++	return numPurgedLinks;	
++}
++
++/* 6. Print all the Links with the status. */
++void 
++LinkStateList::printLinks() {
++	LinkState *cur;
++	
++	// Print all Links...
++	if(numLinks_ == 0) {
++		printf("LinkStateList: Empty ");	
++	} else {
++    		printf("LinkStateList: [(=) - LINKUP; (#) - LINKDOWN]:");
++		for(int i=0; i<numLinks_; i++) {
++			if(cur->isup_) {
++				printf("%d=%d ", cur->src_, cur->dest_); 		
++			} else {
++				printf("%d#%d ", cur->src_, cur->dest_); 	
++			}
++		}		
++	}
++}
++
++/* 7. Free the List. */
++void 
++LinkStateList::freeList() {
++	if(numLinks_==0) {
++		return;
++	}
++	
++	LinkState *cur, *temp;
++	cur = head_;
++	for(int i=0; i<numLinks_; i++) {
++		temp = cur;
++		cur = cur->next_;
++		delete temp;
++	}
++
++	head_ = NULL;
++	numLinks_ = 0;
++}
++
++
++
++
++
++/* [SUB-SECTION-2.2]--------------------------------------------------------------------------------------------------------
++ * PERIPHERAL-NODE LIST:- PERIPHERAL-NODE TABLE
++ * -------------------------------------------------------------------------------------------------------------------------
++ */
++/* 1. Add the Peripheral Node at the head. */ 
++void
++PeripheralNodeList::addPerNode(nsaddr_t addr, int coveredFlag) {
++	PeripheralNode *newPN = new PeripheralNode(addr, coveredFlag);
++	if(newPN == NULL) {				// Check for Allocation Error
++		printf("### Memory Allocation Error in [PeripheralNodeList::addPerNode] ###");
++		exit(0);
++	}
++	newPN->next_ = head_;	// Made necessary Joinings
++	head_ = newPN;
++	numPerNodes_++;	// Increment Number of Neighbors
++}
++
++/* 2. Search for a asked peripheral node. */
++int 
++PeripheralNodeList::findPerNode(nsaddr_t addr) {
++	PeripheralNode *cur;
++	int foundFlag = FALSE;
++	cur = head_;
++	for(int i=0; i<numPerNodes_; i++) {
++		if(addr == cur->addr_) {
++			foundFlag = TRUE;
++			break;
++		}
++		cur = cur->next_;
++	}
++	return foundFlag;	
++}
++
++/* 3. Copy the peripheral node list pointed by passed argument. */
++void
++PeripheralNodeList::copyList(PeripheralNodeList *newPNList) {
++	PeripheralNode *cur = NULL;
++	cur = head_;
++	for(int i=0; i<numPerNodes_; i++) {
++		newPNList->addPerNode(cur->addr_, FALSE); //Init coveredFlag with FALSE for all.
++		cur = cur->next_;
++	}
++}
++
++/* 4. Free the entire List. */
++void 
++PeripheralNodeList::freeList() {
++	if(numPerNodes_ == 0) {
++		return;
++	}
++	PeripheralNode *temp, *cur;
++	cur = head_;
++	for(int i=0; i<numPerNodes_; i++) {
++		temp = cur;
++		cur = cur->next_;
++		delete temp;
++	}
++	head_ = NULL;
++	numPerNodes_ = 0;
++}
++
++
++
++
++
++/* [SUB-SECTION-2.3]--------------------------------------------------------------------------------------------------------
++ * INNER-ROUTE LIST:- INNER-ROUTE TABLE
++ * -------------------------------------------------------------------------------------------------------------------------
++ */
++/* 1. Create a Route... and Add it to the tail. */
++void 
++InnerRouteList::addRoute(nsaddr_t addr, nsaddr_t nextHop, InnerRoute *predecessor, int numHops) {
++	InnerRoute *newRoute = new InnerRoute(addr, nextHop, predecessor, numHops);
++	if(newRoute == NULL) {				// Check for Allocation Error
++		printf("### Memory Allocation Error in [InnerRouteList::addRoute] ###");
++		exit(0);
++	}
++	
++	if(head_==NULL && tail_==NULL) {// Empty list
++		head_ = newRoute;
++		tail_ = newRoute;
++	} else {			// Normal Case
++		tail_->next_ = newRoute;
++		tail_ = newRoute;
++	}
++
++	numRoutes_++;			// Increment # of routes
++}
++
++/* 2. Find the Route and 1)send TRUE & the handle OR 2)send FALSE. */
++int 
++InnerRouteList::findRoute(nsaddr_t addr, InnerRoute **handle) {
++	InnerRoute *cur;
++	int foundFlag;
++	
++	// [i<numRoutes_] condition takes care for EMPTY List case...
++	cur = head_;
++	foundFlag=FALSE;
++	for(int i=0; i<numRoutes_; i++) {
++		if(addr == cur->addr_) {
++			foundFlag = TRUE;
++			break;
++		}
++		cur=cur->next_;
++	}
++	
++	if(foundFlag) {		// If Route is Found
++		*handle = cur;	// ...Return the handle of that Route
++		return TRUE;	// ...Return Found = TRUE		
++	}
++
++	return FALSE;		// Route is NOT found (returning FALSE)
++}
++
++/* 3. Free the Entire List. */
++void 
++InnerRouteList::freeList() {
++	if(numRoutes_ == 0) {
++		return;
++	}
++
++	InnerRoute *temp, *cur;
++	cur=head_;
++	for(int i=0; i<numRoutes_; i++) {
++		temp = cur;
++		cur = cur->next_;
++		delete temp;
++	}
++	head_ = NULL;
++	tail_ = NULL;
++	numRoutes_ = 0;
++}
++
++
++
++
++
++
++/* [SUB-SECTION-2.4]------------------------------------------------------------
++ * UPDATE-DETECT LIST:- UPDATE-DETECT CACHE
++ * -----------------------------------------------------------------------------
++ */
++/* 1. Add at the head. */
++void 
++IARPUpdateDetectedList::addUpdate(nsaddr_t updateSrc, int seq, Time expiry) {
++	IARPUpdate *newUpdate  = new IARPUpdate(updateSrc, seq, expiry);
++	if(newUpdate == NULL) {
++		printf("### Memory Allocation Error in [IARPUpdateDetectedList::addUpdate] ###");
++		exit(0);
++	}
++	newUpdate->next_ = head_;	// Make connections..
++	head_ = newUpdate;
++	numUpdates_++;			// Increment Updates..
++}
++
++/* 2. Find the update and return TRUE or FALSE. */
++int 
++IARPUpdateDetectedList::findUpdate(nsaddr_t updateSrc, int seq) {
++	IARPUpdate *cur;
++	int foundFlag;
++	cur = head_; foundFlag = FALSE;
++	for(int i=0; i<numUpdates_; i++) {
++		if(cur->updateSrc_ == updateSrc && cur->seq_ == seq) {
++			foundFlag = TRUE;	
++			break;
++		}
++		cur = cur->next_;
++	}
++	return foundFlag;
++}
++
++/* 3. Remove all Updates for which the lifetime is expired. */
++void
++IARPUpdateDetectedList::purgeExpiredUpdates() {
++	if(numUpdates_ == 0) {
++		return;		// Nothing to do
++	}
++	// [case-1]: Leaving the 1st case(head_ case)
++	IARPUpdate *prev, *cur;
++	prev = head_;
++	cur = head_->next_;
++  	Time now = Scheduler::instance().clock(); 	// get the time
++	for(int i=1; cur!=NULL; i++) {
++		if(cur->expiry_<now) { // Delete the Update
++			prev->next_ = cur->next_;
++			IARPUpdate *toBeDeleted = cur;
++			cur = cur->next_;
++			delete toBeDeleted;
++			numUpdates_--;		// Decrement Number of Links
++		} else {
++			prev = cur;		// Advance the Pointers
++			cur = cur->next_;				
++		}
++	}
++	// [case-2]: head_ case...
++	if(head_!=NULL) {
++		if(head_->expiry_<now) {
++			IARPUpdate *toBeDeleted = head_;
++			head_ = head_->next_;
++			delete toBeDeleted;
++			numUpdates_--;
++		}
++	}	
++}
++
++/* 4. Free the entire List. */
++void 
++IARPUpdateDetectedList::freeList() {
++	if(numUpdates_ == 0) {
++		return;
++	}
++	IARPUpdate *toBeDeleted, *cur;
++	cur = head_;
++	for(int i=0; i<numUpdates_; i++) {
++		toBeDeleted = cur;
++		cur = cur->next_;
++		delete toBeDeleted;
++	}
++	head_ = NULL;
++	numUpdates_ = 0;
++}
++
++
++
++
++
++/* [SUB-SECTION-2.5]--------------------------------------------------------------------------------------------------------
++ * PERIODIC-UPDATE TIMER:- PERIODIC UPDATE XMISSION
++ * -------------------------------------------------------------------------------------------------------------------------
++ */
++/* 1. starts the timer. */
++void 
++IARPPeriodicUpdateTimer::start(double thistime) {
++	Scheduler::instance().schedule(this, &intr_, thistime);
++}
++
++/* 2. Each time it sends IARP update IF NECESSARY(based on flag value). */
++void 
++IARPPeriodicUpdateTimer::handle(Event* e) {
++	// [Check]: If radius is 1, donot send any update.
++	if(agent_->radius_ == 1) {
++		// Schedule next update in min_iarp_update_period sec
++		Scheduler::instance().schedule(this, &intr_, min_iarp_update_period_);	// Unnecessary but for adaptive-case
++		return;
++	}
++	
++	// [Task-1]: Check if Update is necessary OR not. 
++	// 	     [Condition: (No Changes to send) AND (max_update_time is not elapsed)]
++	Time now = Scheduler::instance().clock(); 	// get the time
++	if((agent_->iarpAgt_).updateSendFlag_==FALSE && (now-lastUpdateSent_)<max_iarp_update_period_) {
++					if(DEBUG) { // [Log: MISS_IARP_UPDATE]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | MISS_IARP_UPDATE | No Neighbor Changes | -Tlsu %d | ",
++					agent_->myaddr_, now, min_iarp_update_period_);
++					agent_->print_tables(); printf("\n"); 
++					} // [Log: End]
++		// schedule next update in min_iarp_update_period sec
++		Scheduler::instance().schedule(this, &intr_, min_iarp_update_period_);
++		return;		
++	}
++	
++	// [Task-2]: Send Update...
++	if((agent_->ndpAgt_).neighborLst_.isEmpty() == FALSE) {	// IF neighbor-list is NOT empty
++		Packet* p;		// .. [Create and Send Update]
++		// [SubTask-1]: Create a packet (TTL should be 'Radius-1')
++  		p = (agent_->pktUtil_).pkt_create(IARP_UPDATE, IP_BROADCAST, agent_->radius_-1); // last arg is TTL=[Radius-1]
++		(agent_->pktUtil_).pkt_add_LSU_space(p, (agent_->ndpAgt_).neighborLst_.numNeighbors_);
++		hdr_zrp *hdrz = HDR_ZRP(p);
++		// [SubTask-2]: Add Neighbor-Info(LSUs)
++		Neighbor *cur = (agent_->ndpAgt_).neighborLst_.head_;	
++		for(int i=0; i<(agent_->ndpAgt_).neighborLst_.numNeighbors_; i++) {
++			hdrz->links_[i].src_ = agent_->myaddr_; 	// My Address
++			hdrz->links_[i].dest_ = cur->addr_;		// Neighbor's Address
++			hdrz->links_[i].isUp_ = cur->linkStatus_;	// Neighbor's Link-Status
++			cur = cur->next_;
++		}
++		hdrz->numlinks_ = (agent_->ndpAgt_).neighborLst_.numNeighbors_;
++		// [SubTask-3]: Broadcast Packet
++		(agent_->pktUtil_).pkt_broadcast(p, 0.00);
++					if(DEBUG) { // [Log: XMIT_IARP_UPDATE]
++					Time now = Scheduler::instance().clock(); // get the time
++					hdr_zrp *hdrz = HDR_ZRP(p); 		  // access ZRP part of pkt header
++				  	hdr_ip *hdrip = HDR_IP(p);
++					printf("\n_%d_ [%6.6f] | XMIT_IARP_UPDATE | -S %d -IS %d | -SEQ %d | ",
++					agent_->myaddr_, now, hdrz->src_, hdrip->saddr(), hdrz->seq_);	
++					(agent_->pktUtil_).pkt_print_links(p); agent_->print_tables(); printf("\n");
++					} // [Log: End]
++		// [SubTask-4]: IARP State Change... [For Control Flooding]
++		(agent_->iarpAgt_).upLst_.addUpdate(hdrz->src_, hdrz->seq_, 
++					now+(agent_->iarpAgt_).updateLifeTime_); // Add into Detected-Update Cache
++		(agent_->iarpAgt_).updateSendFlag_ = FALSE;	// Make the flag [FALSE]
++		lastUpdateSent_ = now;				// Store Last_Update_Send Time
++		// [SubTask-5]: Drop DOWN Neighbors... [For NDP, removing DOWN Neighbors]
++		(agent_->ndpAgt_).neighborLst_.purgeDownNeighbors();	// Purge all DOWN Neighbors from NeighborList
++	} else {	// neighbor-list is EMPTY
++					if(DEBUG) { // [Log: IARP_ISOLATED_NODE ]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | IARP_ISOLATED_NODE | No Neighbors | ",
++					agent_->myaddr_, now);
++					agent_->print_tables(); printf("\n");
++					} // [Log: End]
++	}	
++	
++	// [Task-3]: Schedule next update in min_iarp_update_period sec
++	Scheduler::instance().schedule(this, &intr_, min_iarp_update_period_);
++}
++
++
++
++
++
++
++
++
++/* [SUB-SECTION-2.6]--------------------------------------------------------------------------------------------------------
++ * EXPIRATION-CHECK TIMER:- FOR EXPIRATION OF LINKSTATE AND ROUTES
++ * -------------------------------------------------------------------------------------------------------------------------
++ */
++/* 1. Starts the Timer. */
++void 
++IARPExpirationTimer::start(double thistime) {
++	 Scheduler::instance().schedule(this, &intr_, thistime);
++}
++
++/* 2. Removes the EXPIRED link-state entries & EXPIRED detected Updates periodically. */
++void 
++IARPExpirationTimer::handle(Event* e) {
++	// [Task-1]: Purge all expired Links from the Link-State List...
++	//	     & Purge all expired detected Updates from IARP Update List...	
++	int numPurgedLinks=0; 
++	numPurgedLinks = (agent_->iarpAgt_).lsLst_.purgeLinks();
++	if (numPurgedLinks > 0) {
++		(agent_->iarpAgt_).buildRoutingTable();	  // Rebuild Routing Table
++	}
++	(agent_->iarpAgt_).upLst_.purgeExpiredUpdates();
++	
++	// [Task-2]: schedule next expiration event
++	Scheduler::instance().schedule(this, &intr_, expiration_check_period_ );	
++}
++
++
++
++
++
++
++
++/* [SUB-SECTION-2.7]--------------------------------------------------------------------------------------------------------
++ * IARP AGENT:- INTRA-ZONE ROUTING AGENT
++ * -------------------------------------------------------------------------------------------------------------------------
++ */
++/* 1. Starting Timers & Clearing Lists(Tables). */
++void 
++IARPAgent::startUp() {
++	// [Task-1]: Start Timers...
++	double startUpJitter;
++  	
++	PeriodicUpdateTimer_.start(startUpJitter);
++
++	startUpJitter =  Random::uniform(startup_jitter_);
++	ExpirationTimer_.start(startUpJitter);
++
++	// [Task-2]: Clear all Lists...
++	lsLst_.freeList();	// Link State List
++	pnLst_.freeList();	// Peripheral Node List
++	irLst_.freeList();	// Inner Route List
++	upLst_.freeList();	// Detected IARP_Update List
++}
++
++/* 2. Create Inner Route List based on Link State List. */
++void 
++IARPAgent::buildRoutingTable() {
++	// [Task-1]: Clear the existing Inner Route List & Peirpheral Node List...
++	irLst_.freeList();
++	pnLst_.freeList();
++
++	// [Task-2]: Purge the Expired links & DOWN links...
++	lsLst_.purgeLinks();
++	
++	// [Task-3]: Generate BFS tree from existing Link-State list & store them into Inner Route List...
++	irLst_.addRoute(agent_->myaddr_, agent_->myaddr_, NULL, 0);	// Adding First Entry [0 is IMPortant]
++	InnerRoute *curNode = irLst_.head_;	// We just added first Entry
++	int numHops = 0;	// Intializing...[0 is IMPortant]
++	do {
++		// Scan the Link-State list...
++		LinkState *curLink=lsLst_.head_;
++		InnerRoute *dummyHandle;		// Needed for 'irLst_.findRoute()'...
++		int flagFoundNewDest;
++		nsaddr_t newFoundDest, nextHop;
++		for(int i=0; i<lsLst_.numLinks_; i++) {
++			flagFoundNewDest=FALSE;
++			newFoundDest=-1;
++			nextHop=-1;	
++			// [SubTask-1]: Find New Destination...
++			if(curNode->addr_==curLink->src_) {		// Found New Destination [Case-1]	
++				newFoundDest = curLink->dest_;
++				flagFoundNewDest = TRUE;	
++			} else if(curNode->addr_==curLink->dest_) {	// Found New Destination [Case-2]
++				newFoundDest = curLink->src_;
++				flagFoundNewDest = TRUE;
++			}
++			// [SubTask-2]: Check if this destination has been detected before...
++			//		If [NO] then add new route entry...	
++			if(flagFoundNewDest==TRUE && irLst_.findRoute(newFoundDest, &dummyHandle)==FALSE) {
++				// Find numHops for Found Destination... [Here is WHY- Source's 0 value is IMPortant]	
++				numHops = curNode->numHops_ + 1;
++				// Find Next Hop for Found Destination...[2 cases-Neighbors and others]
++				if(numHops == 1) {
++					nextHop = newFoundDest;		// [Dest = Neighbor] So, [Nexthop = Neighbor]
++				} else if (numHops > 1) {
++					nextHop = curNode->nextHop_;	// [Dest = Others] So, [CurNode's route]	
++				}
++				// Routes are added at the Tail in the list...
++				irLst_.addRoute(newFoundDest, nextHop, curNode, numHops);
++				// Check if it is a peripheral Node
++				if(numHops == agent_->radius_) {	// It's also a peripheral Node
++					if(pnLst_.findPerNode(newFoundDest) == FALSE) {
++						pnLst_.addPerNode(newFoundDest, FALSE);	// Keep it 'coveredFlag=FALSE' for IERP...
++					}
++				}
++			}
++			curLink = curLink->next_;
++		}
++		curNode = curNode->next_;
++	} while(curNode!=NULL);
++}
++
++/* 3. Add Existing route in the packet. */
++void 
++IARPAgent::addRouteInPacket(nsaddr_t dest, Packet *p) {
++	hdr_zrp *hdrz = HDR_ZRP(p);
++	InnerRoute *handleToIARPRoute = NULL;
++	int foundIARPRoute, routeLen;
++	foundIARPRoute = irLst_.findRoute(dest, &handleToIARPRoute);
++	assert(foundIARPRoute == TRUE);		// Route Must be Found;
++	if(foundIARPRoute == TRUE) {
++		routeLen = handleToIARPRoute->numHops_+1;		// adding 1 for Source entry...
++		(agent_->pktUtil_).pkt_add_ROUTE_space(p, routeLen);	// Allocate memory to store route
++		InnerRoute *curNode = handleToIARPRoute;
++		for(int i=routeLen-1; i>=0; i--) {	// Copy route
++			hdrz->route_[i] = curNode->addr_;	
++			curNode = curNode->predecessor_;
++		}
++		assert(hdrz->route_[0] == agent_->myaddr_); assert(hdrz->route_[routeLen-1] == dest);
++		hdrz->routelength_ = routeLen;	// Also Route-length is set.
++	}
++}
++
++/* 4. Receiving IARP Updates. */
++void 
++IARPAgent::recv_IARP_UPDATE(Packet* p) {
++					if(DEBUG) { // [Log: RECV_IARP_UPDATE]
++					Time now = Scheduler::instance().clock(); // get the time
++					hdr_zrp *hdrz = HDR_ZRP(p); 		  // access ZRP part of pkt header
++				  	hdr_ip *hdrip = HDR_IP(p);
++					printf("\n_%d_ [%6.6f] | RECV_IARP_UPDATE | -S %d -IS %d | -SEQ %d | ",
++					agent_->myaddr_, now, hdrz->src_, hdrip->saddr(), hdrz->seq_);	
++					(agent_->pktUtil_).pkt_print_links(p); agent_->print_tables(); printf("\n");
++					} // [Log: End]
++	hdr_zrp *hdrz = HDR_ZRP(p);
++	// [Task-1]: Check if ??this update has been already detected??
++	if(upLst_.findUpdate(hdrz->src_, hdrz->seq_) == TRUE) {
++		(agent_->pktUtil_).pkt_drop(p);		// Do Nothing and Drop the Packet
++		return;					// Return back
++	}
++
++	// [Task-2]: For all LSUs in the packet, Update the Link-State List...
++	Time now = Scheduler::instance().clock(); // get the time
++	LinkState *handleToFoundEntry = NULL;
++	int changeLSLstFlag = FALSE;
++	for(int i=0; i<hdrz->numlinks_; i++) {
++		// [Case-1]: If [current LSU is present] then [Just update its Expiry time & Link-State]
++		if(lsLst_.findLink(hdrz->links_[i].src_, hdrz->links_[i].dest_, &handleToFoundEntry) == TRUE) {
++			if(hdrz->links_[i].isUp_ == LINKDOWN) {
++				changeLSLstFlag = TRUE;		// One link is DOWN, Must update the Routing-Table
++				handleToFoundEntry->isup_ = hdrz->links_[i].isUp_;// Update Attributes - Link-State
++			} else {
++				handleToFoundEntry->isup_ = hdrz->links_[i].isUp_;// Update Attributes - Link-State
++				handleToFoundEntry->expiry_ = now+linkLifeTime_;  // Update Attributes - Expiry Time
++			}
++		// [Case-2]: If [current LSU is not present] then [Add LSU]	
++		} else {
++			lsLst_.addLink(hdrz->links_[i].src_, hdrz->links_[i].dest_, hdrz->seq_, hdrz->links_[i].isUp_,
++			now+linkLifeTime_);
++			changeLSLstFlag = TRUE;	// At least One new link is added...
++		}
++	}
++
++	// [Task-3]: If any Change is detected in Link-State List, Then Build the Routing Table...
++	if(changeLSLstFlag == TRUE) {
++		buildRoutingTable();
++		agent_->route_SendBuffer_pkt();	// Send Buffered packets...
++	}
++
++	// [Task-4]: Add this in the Detected IARP_UPDATE list...
++	upLst_.addUpdate(hdrz->src_, hdrz->seq_, now+updateLifeTime_);
++
++	// [Task-5]: Forward the Same Update packet if ttl is not zero.
++	hdr_ip *hdrip = HDR_IP(p);
++	hdr_cmn *hdrc = HDR_CMN(p);
++	int ttl = hdrip->ttl() - 1;			// Decrement the TTL value
++	if(ttl <= 0) {
++		(agent_->pktUtil_).pkt_drop(p);		// Drop the Packet [No need to Forward]
++	} else {
++		hdrc->direction() = hdr_cmn::DOWN;	// Set Fields
++		hdrip->saddr() = agent_->myaddr_;	// Re-broadcaster
++		hdrip->ttl() = ttl;			// Decremented TTL value
++		hdrz->forwarded_ = 1;			// Setting Forwarding field
++		(agent_->pktUtil_).pkt_broadcast(p, 0.00); // broadcast pkt
++					if(DEBUG) { // [Log: XMIT_IARP_UPDATE]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | XMIT_IARP_UPDATE | -S %d -IS %d | -SEQ %d | ",
++					agent_->myaddr_, now, hdrz->src_, hdrip->saddr(), hdrz->seq_);	
++					(agent_->pktUtil_).pkt_print_links(p); agent_->print_tables(); printf("\n");
++					} // [Log: End]
++	}
++}
++
++/* 5. Receiving IARP DATA(Local Traffic) [Either I need to route the pkt OR I am the DESTINATION]. */
++void 
++IARPAgent::recv_IARP_DATA(Packet* p) {
++  	hdr_ip *hdrip = HDR_IP(p);
++  	hdr_cmn *hdrc = HDR_CMN(p);
++  	hdr_zrp *hdrz = HDR_ZRP(p);
++					if(DEBUG) { // [Log: RECV_IARP_DATA]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | RECV_IARP_DATA | -S %d -D %d | -IS %d -ID %d | -SEQ %d | ",
++					agent_->myaddr_, now, hdrz->src_, hdrz->dest_, hdrip->saddr(), hdrip->daddr(),
++					hdrz->seq_);	
++					(agent_->pktUtil_).pkt_print_route(p); agent_->print_tables(); printf("\n");
++					} // [Log: End]	
++	// [Case-1]: If I am the Destination...
++	if(hdrz->dest_ == agent_->myaddr_) {
++					if(DEBUG) { // [Log: RECV_CBR_DATA]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | RECV_CBR_DATA | -S %d -D %d | -SEQ %d -Type IARP -Delay %6.6f | ",
++					agent_->myaddr_, now, hdrz->src_, hdrz->dest_, hdrz->seq_, now-hdrz->pktsent_);
++					(agent_->pktUtil_).pkt_print_route(p); printf("\n");
++					} // [Log: End]
++		// Delete the route info from the packet [Not Needed Anymore]
++		// (agent_->pktUtil_).pkt_free_ROUTE_space(p);	// [Currently creates memory problems-Not implemented]
++		// copy ecnapsulated data back to this packet
++		hdrc->ptype() = hdrz->enc_ptype_;
++		hdrc->direction() = hdr_cmn::UP; 	// and is sent up
++		hdrc->addr_type_ = NS_AF_NONE;
++		hdrc->size() -= IP_HDR_LEN;  		// cut the header
++		hdrip->dport() = hdrz->enc_dport_;
++		hdrip->saddr() = hdrz->src_;
++		hdrip->daddr() = hdrz->dest_;
++		hdrip->ttl() = 1;
++		(agent_->pktUtil_).pkt_send(p, agent_->myaddr_, 0.00);
++	// [Case-2]: Forward the packet to Next Hop...
++	} else {
++		hdrz->routeindex_++;	// Move 1 hop (FORWARD) into the route(Should be My address)
++		assert(hdrz->route_[hdrz->routeindex_] == agent_->myaddr_); assert(hdrz->routeindex_+1 < hdrz->routelength_);
++		hdrc->direction() = hdr_cmn::DOWN;
++		hdrip->saddr() = agent_->myaddr_;
++		hdrip->daddr() = hdrz->route_[hdrz->routeindex_+1];
++		(agent_->pktUtil_).pkt_send(p, hdrip->daddr(), 0.00);
++					if(DEBUG) { // [Log: XMIT_IARP_DATA]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | XMIT_IARP_DATA | -S %d -D %d | -IS %d -ID %d | -SEQ %d | ",
++					agent_->myaddr_, now, hdrz->src_, hdrz->dest_, hdrip->saddr(), hdrip->daddr(),
++					hdrz->seq_);	
++					(agent_->pktUtil_).pkt_print_route(p); agent_->print_tables(); printf("\n");
++					} // [Log: End]
++	}
++}
++
++/* 6. Print all Tables. */
++void 
++IARPAgent::print_tables() {
++	// [Task-1]: Print current Peripheral nodes
++	printf("Peripheral Nodes:[ ");
++	if(pnLst_.numPerNodes_ == 0) {
++		printf("EMPTY");
++	}
++	PeripheralNode *curPN = pnLst_.head_;
++	for(int i=0; i<pnLst_.numPerNodes_; i++) {
++		printf("%d ", curPN->addr_);
++		curPN = curPN->next_;
++	}
++	printf("]");
++	
++	// [Task-2]: Print All Local Routes
++	printf("Local Routes:[ ");
++	if(irLst_.numRoutes_ == 0){
++		printf("EMPTY");
++	}
++	InnerRoute *cur = irLst_.head_;
++	for(int i=0; i<irLst_.numRoutes_; i++) {
++		printf("(%d:%d), ", cur->addr_, cur->nextHop_);
++		cur = cur->next_;
++	}
++	printf("]");
++}
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++/* [SECTION-3]--------------------------------------------------------------------------------------------------------------
++ * IERP (INTER-ZONE ROUTING PROTOCOL):- SUBSECTIONS CONTAINS FOLLOWING THINGS:
++ *	1) DETECTED IERP-REQUEST	(Detected Queries Cache)
++ *	2) SENT IERP-REQUEST		(Sent Queries Cache)
++ *	3) OUTERROUTE LIST		(Route Table)
++ *	4) EXPIRATION-CHECK TIMER	(For Expiration of IERP-Requests)
++ *	5) IERP AGENT			(Inter-Zone Routing Agent)
++ * -------------------------------------------------------------------------------------------------------------------------
++ * [SUB-SECTION-3.1]--------------------------------------------------------------------------------------------------------
++ * DETECTED IERP-REQUEST:- DETECTED QUERIES CACHE
++ * -------------------------------------------------------------------------------------------------------------------------
++ */
++/* 1. Add Detected Query at the head. */
++void 
++DetectedQueryList::addQuery(nsaddr_t src, nsaddr_t dest, int queryID, Time expiry, PeripheralNodeList *curPNLst) {
++	DetectedQuery *newDQ = new DetectedQuery(src, dest, queryID, expiry, curPNLst);	// Create a new Detected Query
++	if(newDQ == NULL) {	// Check for Allocation Error
++		printf("### Memory Allocation Error in [DetectedQueryList::addQuery] ###");
++		exit(0);
++	}
++	newDQ->next_ = head_;	// Made necessary Joinings			
++	head_ = newDQ;
++	numQueries_++;		// Increment Number of Links
++}
++
++/* 2. Find the Query and 1)send TRUE & the handle OR 2)send FALSE. */
++int 
++DetectedQueryList::findQuery(nsaddr_t src, nsaddr_t dest, int queryID, DetectedQuery **handle) {
++	DetectedQuery *cur;
++	int foundFlag;
++	// [i<numQueries_] condition takes care for EMPTY List case...
++	cur = head_;
++	foundFlag = FALSE;
++	for(int i=0; i<numQueries_; i++) {
++		if(cur->src_ == src && cur->dest_ == dest && cur->queryID_ == queryID) {
++			foundFlag = TRUE;
++			break;
++		}
++		cur=cur->next_;
++	}
++	if(foundFlag) {		// If Query is Found
++		*handle = cur;	// ...Return the handle of that Query
++		return TRUE;	// ...Return Found = TRUE		
++	}
++	return FALSE;		// Query is NOT found (returning FALSE)
++}
++
++/* 3. Find the Query and Delete it. */
++void 
++DetectedQueryList::removeQuery(nsaddr_t src, nsaddr_t dest, int queryID) {
++	DetectedQuery *prev, *cur, *toBeDeleted;
++	// [Case-1]: first Node to Delete...
++	if(head_!=NULL) {
++		if(head_->src_ == src && head_->dest_ == dest && head_->queryID_ == queryID) {
++			toBeDeleted = head_;
++			head_ = head_->next_;
++			(toBeDeleted->pnLst_).freeList();	// It frees the memory
++			delete toBeDeleted;
++			numQueries_--;
++			return;
++		}
++	}
++	// [Case-2]: Normal Case...
++	prev = head_;
++	cur = head_->next_;	
++	for(int i=1; i<numQueries_; i++) {
++		if(cur->src_ == src && cur->dest_ == dest && cur->queryID_ == queryID) {
++			toBeDeleted = cur;
++			prev->next_ = cur->next_;	// Make necessary joinings
++			(toBeDeleted->pnLst_).freeList();	// It frees the memory
++			delete toBeDeleted;
++			numQueries_--;
++			break;
++		}
++		prev = cur;
++		cur = cur->next_;
++	}
++}
++
++/* 4. Remove all Queries for which the lifetime is expired. */
++void 
++DetectedQueryList::purgeExpiredQueries() {
++	if(numQueries_ == 0){
++		return;		// Nothing to do
++	}
++	// [case-1]: Leaving the 1st case(head_ case)
++	DetectedQuery *prev, *cur, *toBeDeleted;
++	prev = head_;
++	cur = head_->next_;
++	Time now = Scheduler::instance().clock();	// get the time
++	for(int i=1; cur!=NULL; i++) {
++		if(cur->expiry_ < now) { // Delete the Query
++			prev->next_ = cur->next_;	// Make necessary joinings
++			toBeDeleted = cur;
++			cur = cur->next_;
++			(toBeDeleted->pnLst_).freeList();	// It frees the memory
++			delete toBeDeleted;
++			numQueries_--;			// Decrement Number of Queries
++		} else {
++			prev = cur;			// Advance the Pointers
++			cur = cur->next_;
++		}
++	}
++	// [case-2]: head_ case...
++	if(head_!=NULL) {
++		if(head_->expiry_<now) {
++			toBeDeleted = head_;
++			head_ = head_->next_;		// Make necessary joinings
++			(toBeDeleted->pnLst_).freeList();	// It frees the memory
++			delete toBeDeleted;
++			numQueries_--;			// Decrement Number of Queries
++		}
++	}
++}
++
++/* 5. Frees the entire list. */
++void 
++DetectedQueryList::freeList() {
++	if(numQueries_ == 0) {
++		return;
++	}
++
++	DetectedQuery *toBeDeleted, *cur;
++	cur = head_;
++	for(int i=0; i<numQueries_; i++) {
++		toBeDeleted = cur;
++		cur = cur->next_;
++		(toBeDeleted->pnLst_).freeList();	// It frees the memory
++		delete toBeDeleted;
++	}
++	head_ = NULL;
++	numQueries_ = 0;
++}
++
++
++
++
++
++/* [SUB-SECTION-3.2]--------------------------------------------------------------------------------------------------------
++ * SENT IERP-REQUEST:- SENT QUERIES CACHE
++ * -------------------------------------------------------------------------------------------------------------------------
++ */
++/* 1. Add Detected Query at the head. */
++void 
++SentQueryList::addQuery(nsaddr_t src, nsaddr_t dest, Time expiry) {
++	SentQuery *newSQ = new SentQuery(src, dest, expiry);	// Create a new Sent Query
++	if(newSQ == NULL) {	// Check for Allocation Error
++		printf("### Memory Allocation Error in [SentQueryList::addQuery] ###");
++		exit(0);
++	}
++
++	newSQ->next_ = head_;	// Made necessary Joinings			
++	head_ = newSQ;
++	numQueries_++;		// Increment Number of Links
++}
++
++/* 2. Find the Query and 1)send TRUE & the handle OR 2)send FALSE. */
++int 
++SentQueryList::findQuery(nsaddr_t src, nsaddr_t dest, SentQuery **handle) {
++	SentQuery *cur = NULL;
++	int foundFlag;
++	// [i<numQueries_] condition takes care for EMPTY List case...
++	cur = head_;
++	foundFlag = FALSE;
++	for(int i=0; i<numQueries_; i++) {
++		if(cur->src_ == src && cur->dest_ == dest) {
++			foundFlag = TRUE;
++			break;
++		}
++		cur=cur->next_;
++	}	
++	if(foundFlag) {		// If Query is Found
++		*handle = cur;	// ...Return the handle of that Query
++		return TRUE;	// ...Return Found = TRUE		
++	}
++	return FALSE;		// Query is NOT found (returning FALSE)
++}
++
++/* 3. Find the Query and Delete it. */
++void 
++SentQueryList::removeQuery(nsaddr_t src, nsaddr_t dest) {
++	SentQuery *prev, *cur, *toBeDeleted;
++	// [Case-1]: first Node to Delete...
++	if(head_!=NULL) {
++		if(head_->src_ == src && head_->dest_ == dest) {
++			toBeDeleted = head_;
++			head_ = head_->next_;
++			delete toBeDeleted;
++			numQueries_--;
++			return;
++		}
++	}
++	// [Case-2]: Normal Case...
++	prev = head_;
++	cur = head_->next_;
++	for(int i=1; i<numQueries_; i++) {
++		if(cur->src_ == src && cur->dest_ == dest) {
++			toBeDeleted = cur;
++			prev->next_ = cur->next_;	// Make necessary joinings
++			delete toBeDeleted;
++			numQueries_--;
++			break;
++		}
++		prev = cur;
++		cur = cur->next_;
++	}
++}
++
++/* 4. Remove all Queries for which the lifetime is expired. */
++void 
++SentQueryList::purgeExpiredQueries() {
++	if(numQueries_ == 0){
++		return;		// Nothing to do
++	}
++	// [case-1]: Leaving the 1st case(head_ case)
++	SentQuery *prev, *cur, *toBeDeleted;
++	prev = head_;
++	cur = head_->next_;
++	Time now = Scheduler::instance().clock();	// get the time
++	for(int i=1; cur!=NULL; i++) {
++		if(cur->expiry_ < now) { 		// Delete the Query
++			prev->next_ = cur->next_;	// Make necessary joinings
++			toBeDeleted = cur;
++			cur = cur->next_;
++			delete toBeDeleted;
++			numQueries_--;			// Decrement Number of Queries
++		} else {
++			prev = cur;			// Advance the Pointers
++			cur = cur->next_;
++		}
++	}
++	// [case-2]: head_ case...
++	if(head_!=NULL) {
++		if(head_->expiry_<now) {
++			toBeDeleted = head_;
++			head_ = head_->next_;		// Make necessary joinings
++			delete toBeDeleted;
++			numQueries_--;			// Decrement Number of Queries
++		}
++	}
++}
++
++/* 5. Frees the entire list. */
++void 
++SentQueryList::freeList() {
++	if(numQueries_ == 0) {
++		return;
++	}
++
++	SentQuery *toBeDeleted, *cur;
++	cur = head_;
++	for(int i=0; i<numQueries_; i++) {
++		toBeDeleted = cur;
++		cur = cur->next_;
++		delete toBeDeleted;
++	}
++	head_ = NULL;
++	numQueries_ = 0;
++}
++
++
++
++
++
++
++/* [SUB-SECTION-4.4]------------------------------------------------------------
++ * EXPIRATION-CHECK TIMER:- FOR EXPIRATION OF IERP-REQUESTS
++ * -----------------------------------------------------------------------------
++ */
++/* 1. Starts the Timer, Called by startUp() method. */
++void 
++IERPExpirationTimer::start(double thistime) {
++	Scheduler::instance().schedule(this, &intr_, thistime);
++}
++
++/* 2. Purge all expired Queries/Routes. */
++void
++IERPExpirationTimer::handle(Event*) {
++	// [Task-1]: Purge all expired Queries from the Query-Detect(/Sent) List...
++	//	     & Purge all Outer Routes from Outer-Route List...	
++	(agent_->ierpAgt_).dqLst_.purgeExpiredQueries();
++	(agent_->ierpAgt_).sqLst_.purgeExpiredQueries();
++	(agent_->sendBuf_).purgeExpiredPackets();	// For ZRP agent
++	// [Task-2]: schedule next expiration event
++	Scheduler::instance().schedule(this, &intr_, expiration_check_period_ );	
++}
++
++
++
++
++
++
++/* [SUB-SECTION-4.5]------------------------------------------------------------
++ * IERP AGENT:- INTER-ZONE ROUTING AGENT
++ * -----------------------------------------------------------------------------
++ */
++/* 1. Start the Timers and Clear the Tables. */
++void 
++IERPAgent::startUp() {
++	// [Task-1]: Start Timers...
++	double startUpJitter;
++  	startUpJitter =  Random::uniform(startup_jitter_);
++	ExpirationTimer_.start(startUpJitter);
++
++	// [Task-2]: Clear all Lists...
++	dqLst_.freeList();	// Detected-Query List
++	sqLst_.purgeExpiredQueries();	// Sent-Query List
++}
++
++/* 2. Appends own address to the route. */
++void 
++IERPAgent::addMyAddressToRoute(Packet *pold, Packet *pnew) {
++	hdr_zrp *hdrzold = HDR_ZRP(pold);
++	hdr_zrp *hdrznew = HDR_ZRP(pnew);
++	int routeLen;
++	routeLen = hdrzold->routelength_ + 1;	// For My Address
++	// [Task-1]: Allocate memory to store route
++	(agent_->pktUtil_).pkt_add_ROUTE_space(pnew, routeLen);	
++	// [Task-2]: Copy 1st part of route
++	for(int i=0; i<hdrzold->routelength_; i++) {		
++		hdrznew->route_[i] = hdrzold->route_[i];	// ['0' to 'hdrzold->routelength_ - 1']
++	}
++	// [Task-3]: Copy 2nd part of route
++	hdrznew->route_[routeLen-1] = agent_->myaddr_;
++	// [Task-4]: Update Route-Length
++	hdrznew->routelength_ = routeLen;	// Also Route-length is set.
++}
++
++/* 3. Marks all covered peripheral nodes based on Last bordercaster Info. */
++void 
++IERPAgent::markCoveredPN(DetectedQuery *queryInCache, nsaddr_t lastBC) {
++	PeripheralNode *cur = NULL;
++	cur = (queryInCache->pnLst_).head_;
++	InnerRoute *handleToFoundRoute = NULL;
++	int foundRouteFlag;
++	for(int i=0; i<(queryInCache->pnLst_).numPerNodes_; i++) {
++		foundRouteFlag = (agent_->iarpAgt_).irLst_.findRoute(cur->addr_, &handleToFoundRoute);
++		if(foundRouteFlag == TRUE) {	// Route to Peripheral node exists [It must exist]
++			if(handleToFoundRoute->nextHop_ == lastBC) {
++				cur->coveredFlag_ = TRUE;	// Mark this Node
++			}
++		}
++		cur = cur->next_;	// Advance the Pointer
++	}
++}
++
++/* 4. Receiving IERP-route-request. [Unicast Case] */
++void 
++IERPAgent::recv_IERP_ROUTE_REQUEST_UNI(Packet* p) {
++	hdr_zrp *hdrz = HDR_ZRP(p);
++	hdr_ip *hdrip = HDR_IP(p);
++					if(DEBUG) { // [Log: RECV_IERP_REQUEST]
++					if(agent_->myaddr_ != hdrz->src_) {	// Only Non-source case...
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | RECV_IERP_REQUEST | -S %d -D %d | -IS %d -ID %d | -QID %d | ",
++					agent_->myaddr_, now, hdrz->src_, hdrz->dest_, hdrip->saddr(), hdrip->daddr(),
++					hdrz->queryID_);	
++					(agent_->pktUtil_).pkt_print_route(p); agent_->print_tables(); printf("\n");}
++					} // [Log: End]
++	// [CommonTask]: Check if this is a new query?? If Yes, Add this Query to the Cache
++	Time now = Scheduler::instance().clock(); // get the time
++	DetectedQuery *handleToFoundDQ = NULL;
++	int foundQueryFlag;
++	foundQueryFlag = dqLst_.findQuery(hdrz->src_, hdrz->dest_, hdrz->queryID_, &handleToFoundDQ);
++	if(foundQueryFlag == TRUE) {
++		if(hdrz->dest_ != agent_->myaddr_) {	// Need to send multiple replies if I am dest.
++			(agent_->pktUtil_).pkt_drop(p);	// Drop the original Packet 
++			return;				// Nothing to Do
++		}
++	} else {	// For Control Flooding
++		dqLst_.addQuery(hdrz->src_, hdrz->dest_, hdrz->queryID_, now+queryLifeTime_, NULL);
++	}
++
++	// [Task-1]: If I am the Destination [Create a ROUTE-REPLY(New Packet) and Send it back]]
++	if(hdrz->dest_ == agent_->myaddr_) {
++		// [SubTask-0]: Check how many replies have been sent.
++		DetectedQuery *handleToFoundDQ = NULL;
++		int foundQueryFlag;
++		foundQueryFlag = dqLst_.findQuery(hdrz->src_, hdrz->dest_, hdrz->queryID_, &handleToFoundDQ);
++		assert(foundQueryFlag == TRUE);
++		if(handleToFoundDQ->totalReplySent_ >= DEFAULT_MAX_IERP_REPLY) {
++			return; // No more replies should be sent.
++		} else {
++			handleToFoundDQ->totalReplySent_++;	// Reply is sent in below code.
++		}
++		// [SubTask-1]: Create a IERP_REPLY packet ['hdrz->routelength_+1': My address needs to be added]
++		Packet *pnew = (agent_->pktUtil_).pkt_create(IERP_REPLY, hdrz->dest_, hdrz->routelength_+1);
++		addMyAddressToRoute(p, pnew);	// Add My address to the route
++		// [SubTask-2]: Set Parameters...
++		hdr_zrp *hdrznew = HDR_ZRP(pnew);
++		hdrznew->src_ = hdrz->src_;			// Identification fields at Sender of the Query
++		hdrznew->dest_ = hdrz->dest_;			// Identification fields at Sender of the Query
++		hdrznew->seq_ = hdrz->seq_;			// Identification fields at Sender of the Query
++		hdrznew->queryID_ = hdrz->queryID_;		// Identification fields at Sender of the Query
++		hdrznew->routeindex_ = hdrznew->routelength_-1;	// My_address in the route
++		// [SubTask-3]: Send the Packet
++		hdr_ip *hdripnew = HDR_IP(pnew);
++		hdripnew->saddr() = agent_->myaddr_;
++    		hdripnew->daddr() = hdrznew->route_[hdrznew->routeindex_-1];	// Previous Hop
++		(agent_->pktUtil_).pkt_send(pnew, hdripnew->daddr(), 0.00);
++					if(DEBUG) { // [Log: XMIT_IERP_REPLY]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | XMIT_IERP_REPLY | -S %d -D %d | -IS %d -ID %d | -QID %d | ",
++					agent_->myaddr_, now, hdrznew->src_, hdrznew->dest_, hdripnew->saddr(),
++					hdripnew->daddr(), hdrznew->queryID_);	
++					(agent_->pktUtil_).pkt_print_route(pnew); agent_->print_tables(); printf("\n");
++					} // [Log: End]
++		// [SubTask-4]: Snooping the replies.. Adding this info into topology table.
++		int routingTableUpdatedFlag=FALSE;
++		routingTableUpdatedFlag = addLinkStateFromRoute(hdrznew->route_, hdrznew->routelength_);
++		if(routingTableUpdatedFlag == TRUE) {
++			agent_->route_SendBuffer_pkt();	// Send Buffered packets...
++		}
++		
++		// [SubTask-5]: Drop the original Packet 
++		(agent_->pktUtil_).pkt_drop(p);	
++		return;
++	}
++
++	// [Task-2]: If Destination lies in My Zone.. [Unicast the request to Destination]
++	InnerRoute *handleToFoundRoute = NULL;
++	int foundRouteFlag, alreadySentNb=-1;
++	foundRouteFlag = (agent_->iarpAgt_).irLst_.findRoute(hdrz->dest_, &handleToFoundRoute);
++	if(foundRouteFlag == TRUE && handleToFoundRoute->nextHop_ != hdrz->lastbc_) {	// Found Route in Zone
++		// [SubTask-1]: Create a packet
++		hdr_ip *hdrip = HDR_IP(p);
++		int ttl = hdrip->ttl() - 1;	// Reducing the TTL value
++		Packet *pnew = (agent_->pktUtil_).pkt_create(IERP_REQUEST, handleToFoundRoute->nextHop_, ttl);
++		addMyAddressToRoute(p, pnew);	// Add My address to the route
++		// [SubTask-2]: Set Parameters...
++		hdr_zrp *hdrznew = HDR_ZRP(pnew);
++		hdrznew->src_ = hdrz->src_;	// Identification fields at Sender of the Query
++		hdrznew->dest_ = hdrz->dest_;	// Identification fields at Sender of the Query
++		hdrznew->seq_ = hdrz->seq_;	// Identification fields at Sender of the Query
++		hdrznew->queryID_ = hdrz->queryID_;// Identification fields at Sender of the Query
++		hdrznew->lastbc_ = agent_->myaddr_;
++		hdrznew->routeindex_ = hdrznew->routelength_ - 1;	// My_address in the route [Just Added b4]
++		// [SubTask-3]: Send the Packet...
++		hdr_ip *hdripnew = HDR_IP(pnew);
++		hdripnew->saddr() = agent_->myaddr_;	
++    		hdripnew->daddr() = handleToFoundRoute->nextHop_;
++		(agent_->pktUtil_).pkt_send(pnew, handleToFoundRoute->nextHop_, 0.00);
++		alreadySentNb = handleToFoundRoute->nextHop_;
++					if(DEBUG) { // [Log: XMIT_IERP_REQUEST]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | XMIT_IERP_REQUEST | -S %d -D %d | -IS %d -ID %d | -QID %d |",
++					agent_->myaddr_, now, hdrznew->src_, hdrznew->dest_, 
++					hdripnew->saddr(), hdripnew->daddr(), hdrznew->queryID_);	
++					(agent_->pktUtil_).pkt_print_route(pnew); agent_->print_tables(); printf("\n");
++					} // [Log: End]
++	}
++
++	// [Task-3]: Bordercast The Query...
++	// [SubTask-1]: Bordercast it(Find all Next-Hop neighbors to  un-covered-perpheral-nodes)...
++	NeighborList NbLst;	// Temporary list of query-forwarders
++	PeripheralNode *curPN;
++	handleToFoundRoute = NULL;
++	foundRouteFlag = -1;
++	curPN = (agent_->iarpAgt_).pnLst_.head_;	// Fetch PN-list from IARP
++	for(int i=0; i<(agent_->iarpAgt_).pnLst_.numPerNodes_; i++) {	// For all Peripheral Nodes
++		foundRouteFlag = (agent_->iarpAgt_).irLst_.findRoute(curPN->addr_, &handleToFoundRoute);
++		if(foundRouteFlag == TRUE) {	// Add these Neighbors into List
++			int foundNbFlag;
++			Neighbor *handleToFoundNb = NULL;	// Do Not add Same Neighbors
++			foundNbFlag = NbLst.findNeighbor(handleToFoundRoute->nextHop_, &handleToFoundNb);
++			if(foundNbFlag == FALSE 					// Not already added
++				&& handleToFoundRoute->nextHop_ != hdrz->lastbc_ 	// Not Last BorderCaster
++				&& handleToFoundRoute->nextHop_ != alreadySentNb	// Not already sent above & No loop
++				&& (agent_->pktUtil_).pkt_AmIOnTheRoute(p, handleToFoundRoute->nextHop_) == FALSE) {
++				// Last-2 args-doesnt matter
++				NbLst.addNeighbor(handleToFoundRoute->nextHop_, 0.0, LINKDOWN); 
++			}
++		}
++		curPN = curPN->next_;
++	}
++	// [SubTask-2]: Bordercast it(Send a Query to every neighbor in the list)...
++	if(NbLst.isEmpty() == FALSE) {
++		hdr_ip *hdrip = HDR_IP(p);
++		int ttl = hdrip->ttl() - 1;	// Reducing the TTL value
++		if(ttl <= 0) {
++			(agent_->pktUtil_).pkt_drop(p);		// Drop the Packet [No need to Forward]
++			return;
++		}
++		Neighbor *curNb = NULL;
++		curNb = NbLst.head_;
++		for(int i=0; i<NbLst.numNeighbors_; i++) {
++			// Create a Packet... 
++			Packet *pnew = (agent_->pktUtil_).pkt_create(IERP_REQUEST, curNb->addr_, ttl);
++			addMyAddressToRoute(p, pnew);	// Add My address to the route
++			// Set Parameters...
++			hdr_zrp *hdrznew = HDR_ZRP(pnew);
++			hdrznew->src_ = hdrz->src_;	// Identification fields at Sender of the Query
++			hdrznew->dest_ = hdrz->dest_;	// Identification fields at Sender of the Query
++			hdrznew->seq_ = hdrz->seq_;	// Identification fields at Sender of the Query
++			hdrznew->queryID_ = hdrz->queryID_;// Identification fields at Sender of the Query
++			hdrznew->lastbc_ = agent_->myaddr_;
++			hdrznew->routeindex_ = hdrznew->routelength_ - 1;	// My_address in the route [Just Added b4]
++
++			// Send the Packet...
++			hdr_ip *hdripnew = HDR_IP(pnew);
++			hdripnew->saddr() = agent_->myaddr_;	
++	    		hdripnew->daddr() = curNb->addr_;
++			Time jitter;
++			jitter =  Random::uniform(IERP_XMIT_JITTER);
++			(agent_->pktUtil_).pkt_send(pnew, curNb->addr_, jitter);
++					if(DEBUG) { // [Log: XMIT_IERP_REQUEST]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | XMIT_IERP_REQUEST | -S %d -D %d | -IS %d -ID %d | -QID %d |",
++					agent_->myaddr_, now+jitter, hdrznew->src_, hdrznew->dest_, 
++					hdripnew->saddr(), hdripnew->daddr(), hdrznew->queryID_);	
++					(agent_->pktUtil_).pkt_print_route(pnew); agent_->print_tables(); printf("\n");
++					} // [Log: End]
++			curNb = curNb->next_;		// Advance the Pointer
++		}
++		/*[Cumulative Log-Entry]if(DEBUG) { // [Log: EVENT_XMIT_IERP_REQUEST_FORWARDED]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | EVENT_XMIT_IERP_REQUEST_FORWARDED | Node %d has forwarded "
++					"IERP_REQUEST(seq=%d) | [ SRC = %d : DEST = %d ] | To following Neighbors - ",
++					agent_->myaddr_, now, agent_->myaddr_, hdrz->seq_, hdrz->src_, hdrz->dest_);	
++					NbLst.printNeighbors(); (agent_->pktUtil_).pkt_print_route(p); 
++					agent_->print_tables(); printf("\n"); 
++					} // [Log: End]	*/
++	}
++	(agent_->pktUtil_).pkt_drop(p);	// Drop the original Packet 
++}
++
++/* 5. Receiving IERP-route-request. [Multi-cast Case] */
++/*void 
++IERPAgent::recv_IERP_ROUTE_REQUEST_MC(Packet* p) {
++	hdr_zrp *hdrz = HDR_ZRP(p);
++	hdr_ip *hdrip = HDR_IP(p);
++					if(DEBUG) { // [Log: RECV_IERP_REQUEST]
++					if(agent_->myaddr_ != hdrz->src_) {	// Only Non-source case...
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | RECV_IERP_REQUEST | -S %d -D %d | -IS %d -ID %d | -QID %d | ",
++					agent_->myaddr_, now, hdrz->src_, hdrz->dest_, hdrip->saddr(), hdrip->daddr(),
++					hdrz->queryID_);	
++					(agent_->pktUtil_).pkt_print_route(p); agent_->print_tables(); printf("\n");}
++					} // [Log: End]
++	
++	// [CommonTask-1]: Check if this is a new query?? If not, Add this Query to the Cache
++	Time now = Scheduler::instance().clock(); // get the time
++	DetectedQuery *handleToFoundDQ = NULL;
++	int foundQueryFlag;
++	foundQueryFlag = dqLst_.findQuery(hdrz->src_, hdrz->dest_, hdrz->queryID_, &handleToFoundDQ);
++	if(foundQueryFlag == TRUE) {
++		if(hdrz->dest_ != agent_->myaddr_ && handleToFoundDQ->querySentFlag_ == TRUE) {	// Already sent the Query
++			(agent_->pktUtil_).pkt_drop(p);		// Drop the original Packet 
++			return;					// Nothing to Do
++		}
++	} else {	// For control Flooding...
++		dqLst_.addQuery(hdrz->src_, hdrz->dest_, hdrz->queryID_, now+queryLifeTime_, &((agent_->iarpAgt_).pnLst_));
++	}
++
++	// [CommonTask-2]: If I am not the Source, Do the Following...
++	if(hdrz->src_ != agent_->myaddr_) {	// If I am not the originator of the query
++		// [Sub-CommonTask-1]: Mark All covered peripheral nodes based on previous bordercaster info.
++		foundQueryFlag = dqLst_.findQuery(hdrz->src_, hdrz->dest_, hdrz->queryID_, &handleToFoundDQ);
++		assert(foundQueryFlag == TRUE);		// Must be there in Cache
++		markCoveredPN(handleToFoundDQ, hdrz->lastbc_);
++		// [Sub-CommonTask-2]: Check if I am a Multicast receiver or not
++		int receiveFlag = (agent_->pktUtil_).pkt_AmIMultiCastReciver(p, agent_->myaddr_);
++		if(receiveFlag == FALSE) {
++			return;		// Nothing to Do
++		}
++	}
++
++	// [Task-1]: If I am the Destination [Create a ROUTE-REPLY(New Packet) and Send it back]]
++	if(hdrz->dest_ == agent_->myaddr_) {
++		// [SubTask-0]: Check how many replies have been sent.
++		DetectedQuery *handleToFoundDQ = NULL;
++		int foundQueryFlag;
++		foundQueryFlag = dqLst_.findQuery(hdrz->src_, hdrz->dest_, hdrz->queryID_, &handleToFoundDQ);
++		assert(foundQueryFlag == TRUE);
++		if(handleToFoundDQ->totalReplySent_ >= DEFAULT_MAX_IERP_REPLY) {
++			return; // No more replies should be sent.
++		} else {
++			handleToFoundDQ->totalReplySent_++;	// Reply is sent in below code.
++		}
++		// [SubTask-1]: Create a IERP_REPLY packet ['hdrz->routelength_+1': My address needs to be added]
++		Packet *pnew = (agent_->pktUtil_).pkt_create(IERP_REPLY, hdrz->dest_, hdrz->routelength_+1);
++		addMyAddressToRoute(p, pnew);	// Add My address to the route
++		// [SubTask-2]: Set Parameters...
++		hdr_zrp *hdrznew = HDR_ZRP(pnew);
++		hdrznew->src_ = hdrz->src_;			// Identification fields at Sender of the Query
++		hdrznew->dest_ = hdrz->dest_;			// Identification fields at Sender of the Query
++		hdrznew->seq_ = hdrz->seq_;			// Identification fields at Sender of the Query
++		hdrznew->queryID_ = hdrz->queryID_;		// Identification fields at Sender of the Query
++		hdrznew->routeindex_ = hdrznew->routelength_-1;	// My_address in the route
++		// [SubTask-3]: Send the Packet
++		hdr_ip *hdripnew = HDR_IP(pnew);
++		hdripnew->saddr() = agent_->myaddr_;
++    		hdripnew->daddr() = hdrznew->route_[hdrznew->routeindex_-1];	// Previous Hop
++		(agent_->pktUtil_).pkt_send(pnew, hdripnew->daddr(), 0.00);
++					if(DEBUG) { // [Log: XMIT_IERP_REPLY]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | XMIT_IERP_REPLY | -S %d -D %d | -IS %d -ID %d | -QID %d | ",
++					agent_->myaddr_, now, hdrznew->src_, hdrznew->dest_, hdripnew->saddr(),
++					hdripnew->daddr(), hdrznew->queryID_);	
++					(agent_->pktUtil_).pkt_print_route(pnew); agent_->print_tables(); printf("\n");
++					} // [Log: End]
++		// [SubTask-4]: Set the flag for Query-Sent...
++		handleToFoundDQ = NULL;
++		foundQueryFlag = -1;
++		foundQueryFlag = dqLst_.findQuery(hdrz->src_, hdrz->dest_, hdrz->queryID_, &handleToFoundDQ);
++		assert(foundQueryFlag == TRUE);				// Query Must be in the cache
++		assert(handleToFoundDQ->querySentFlag_ == FALSE);	// Query must not be sent before
++		handleToFoundDQ->querySentFlag_ = TRUE;			// Set the flag for query-sent [Here, Query-processed]
++		// [SubTask-5]: Drop the Packet...
++		(agent_->pktUtil_).pkt_drop(p);	// Drop the original Packet 
++		return;
++	}
++
++	// [Task-2]: If Destination lies in My Zone.. [Unicast the request to Destination]
++	// This Node should multicast - too - to only 1 node [weird use of words ;)]
++	InnerRoute *handleToFoundRoute = NULL;
++	int foundRouteFlag, alreadySentNb=-1;
++	foundRouteFlag = (agent_->iarpAgt_).irLst_.findRoute(hdrz->dest_, &handleToFoundRoute);
++	if(foundRouteFlag == TRUE) {	// Found Route in Zone
++		// [SubTask-1]: Create a packet
++		hdr_ip *hdrip = HDR_IP(p);
++		int ttl = hdrip->ttl() - 1;	// Reducing the TTL value
++		Packet *pnew = (agent_->pktUtil_).pkt_create(IERP_REQUEST, handleToFoundRoute->nextHop_, ttl);
++		addMyAddressToRoute(p, pnew);	// Add My address to the route
++		// [SubTask-2]: Set Parameters...
++		hdr_zrp *hdrznew = HDR_ZRP(pnew);
++		hdrznew->src_ = hdrz->src_;	// Identification fields at Sender of the Query
++		hdrznew->dest_ = hdrz->dest_;	// Identification fields at Sender of the Query
++		hdrznew->seq_ = hdrz->seq_;	// Identification fields at Sender of the Query
++		hdrznew->queryID_ = hdrz->queryID_;// Identification fields at Sender of the Query
++		hdrznew->lastbc_ = agent_->myaddr_;
++		hdrznew->routeindex_ = hdrznew->routelength_ - 1;	// My_address in the route [Just Added b4]
++		// [SubTask-3]: Send the Packet...
++		hdr_ip *hdripnew = HDR_IP(pnew);
++		hdripnew->saddr() = agent_->myaddr_;	
++    		hdripnew->daddr() = handleToFoundRoute->nextHop_;
++		(agent_->pktUtil_).pkt_add_ADDRESS_space(pnew,1);	// Add Multi-cast Addresses [Allocate Memory]
++		hdrznew->mcLstSize_ = 1;				// Setting parameter
++		hdrznew->mcLst_[0] = handleToFoundRoute->nextHop_;	// Adding multi-cast address
++		(agent_->pktUtil_).pkt_send(pnew, hdripnew->daddr(), 0.00);
++		alreadySentNb = handleToFoundRoute->nextHop_;
++					if(DEBUG) { // [Log: XMIT_IERP_REQUEST]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | XMIT_IERP_REQUEST | -S %d -D %d | -IS %d -ID %d | -QID %d |",
++					agent_->myaddr_, now, hdrznew->src_, hdrznew->dest_, 
++					hdripnew->saddr(), hdripnew->daddr(), hdrznew->queryID_);	
++					(agent_->pktUtil_).pkt_print_route(pnew); agent_->print_tables(); printf("\n");
++					} // [Log: End]
++		// [SubTask-4]: Set the flag for Query-Sent...
++		DetectedQuery *handleToFoundDQ = NULL;
++		int foundQueryFlag;
++		foundQueryFlag = dqLst_.findQuery(hdrz->src_, hdrz->dest_, hdrz->queryID_, &handleToFoundDQ);
++		assert(foundQueryFlag == TRUE);				// Query Must be in the cache
++		assert(handleToFoundDQ->querySentFlag_ == FALSE);	// Query must not be sent before
++		handleToFoundDQ->querySentFlag_ = TRUE;			// Set the flag for query-sent
++	}
++
++	// [Task-3]: Bordercast The Query... 
++	// [SubTask-1]: Bordercast it(Find all Next-Hop neighbors to  un-covered-perpheral-nodes)...
++	NeighborList NbLst;			// Temporary list of query-forwarders
++	PeripheralNode *curPN;
++	handleToFoundRoute = NULL;
++	foundRouteFlag = -1;
++	handleToFoundDQ = NULL;
++	foundQueryFlag = -1;	
++	foundQueryFlag = dqLst_.findQuery(hdrz->src_, hdrz->dest_, hdrz->queryID_, &handleToFoundDQ);
++	assert(foundQueryFlag == TRUE);		// Query Must be in the cache
++	curPN = (handleToFoundDQ->pnLst_).head_;
++	for(int i=0; i<(handleToFoundDQ->pnLst_).numPerNodes_; i++) {	// For all Peripheral Nodes
++		if(curPN->coveredFlag_ == TRUE) {
++			curPN = curPN->next_;	// Advance Pointer
++			continue;		// Skip this Peripheral Node
++		}
++		foundRouteFlag = (agent_->iarpAgt_).irLst_.findRoute(curPN->addr_, &handleToFoundRoute);
++		if(foundRouteFlag == TRUE) {	// Add these Neighbors into List
++			int foundNbFlag;
++			Neighbor *handleToFoundNb = NULL;	// Do Not Replicate Same Neighbors
++			foundNbFlag = NbLst.findNeighbor(handleToFoundRoute->nextHop_, &handleToFoundNb);
++			if(foundNbFlag == FALSE && handleToFoundRoute->nextHop_ != hdrz->lastbc_
++						&& handleToFoundRoute->nextHop_ != alreadySentNb) {
++				// Last-2 args-doesnt matter
++				NbLst.addNeighbor(handleToFoundRoute->nextHop_, 0.0, LINKDOWN); 
++			}
++		}
++		curPN->coveredFlag_ = TRUE;	// We are sending the query	
++		curPN = curPN->next_;
++	}
++	// [SubTask-2]: Bordercast it(Send a Query to every neighbor in the list)...
++	if(NbLst.isEmpty() == FALSE) {
++		hdr_ip *hdrip = HDR_IP(p);
++		int ttl = hdrip->ttl() - 1;	// Reducing the TTL value
++		// 1. Create a Packet... 
++		Packet *pnew = (agent_->pktUtil_).pkt_create(IERP_REQUEST, IP_BROADCAST, ttl);
++		// 2. Add My address to the route...
++		addMyAddressToRoute(p, pnew);
++		// 3. Add Multicast addresses...
++		hdr_zrp *hdrznew = HDR_ZRP(pnew);
++		(agent_->pktUtil_).pkt_add_ADDRESS_space(pnew, NbLst.numNeighbors_);// Add Multi-cast Addresses[Allocate Memory]
++		hdrznew->mcLstSize_ = NbLst.numNeighbors_;	// Setting parameter
++		Neighbor *curNb = NULL; 
++		curNb = NbLst.head_;
++		for(int i=0; i<NbLst.numNeighbors_; i++) {
++			hdrznew->mcLst_[i] = curNb->addr_;
++			curNb = curNb->next_;
++		}
++		// 4. Set parameters...
++		hdrznew->src_ = hdrz->src_;	// Identification fields at Sender of the Query
++		hdrznew->dest_ = hdrz->dest_;	// Identification fields at Sender of the Query
++		hdrznew->seq_ = hdrz->seq_;	// Identification fields at Sender of the Query
++		hdrznew->queryID_ = hdrz->queryID_;// Identification fields at Sender of the Query
++		hdrznew->lastbc_ = agent_->myaddr_;
++		hdrznew->routeindex_ = hdrznew->routelength_-1;	// My_address in the route [Just Added b4]
++
++		// 5. Multicast(Broadcast) the Packet...
++		hdr_ip *hdripnew = HDR_IP(pnew);
++		hdripnew->saddr() = agent_->myaddr_;	
++    		hdripnew->daddr() = IP_BROADCAST;// Just to be sure
++		(agent_->pktUtil_).pkt_broadcast(pnew, (double)(IERP_XMIT_JITTER));
++					if(DEBUG) { // [Log: XMIT_IERP_REQUEST]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | XMIT_IERP_REQUEST | -S %d -D %d | -IS %d -ID BROADCAST | "
++					"-QID %d | Sent to ", agent_->myaddr_, now, hdrznew->src_, hdrznew->dest_, 
++					hdripnew->saddr(), hdrznew->queryID_);
++					NbLst.printNeighbors(); (agent_->pktUtil_).pkt_print_route(pnew); 
++					agent_->print_tables(); printf("\n");
++					} // [Log: End]
++		// 6. Set the flag for Query-Sent...
++		DetectedQuery *handleToFoundDQ = NULL;
++		int foundQueryFlag;
++		foundQueryFlag = dqLst_.findQuery(hdrz->src_, hdrz->dest_, hdrz->queryID_, &handleToFoundDQ);
++		assert(foundQueryFlag == TRUE);				// Query Must be in the cache
++		assert(handleToFoundDQ->querySentFlag_ == FALSE);	// Query must not be sent before
++		handleToFoundDQ->querySentFlag_ = TRUE;			// Set the flag for query-sent
++	}
++	(agent_->pktUtil_).pkt_drop(p);	// Drop the original Packet 
++}*/
++
++int 
++IERPAgent::addLinkStateFromRoute(nsaddr_t *route, int size) {
++	// For each link in route, add them in the IARP-Link-State-Table
++	assert(size!=0);
++	Time now = Scheduler::instance().clock(); // get the time
++	LinkState *handleToFoundLS;
++	int LSFoundFlag, LSTChangeFlag=FALSE;
++	for(int i=0; i<size-1; i++) {
++		handleToFoundLS = NULL; LSFoundFlag = FALSE;
++		LSFoundFlag = (agent_->iarpAgt_).lsLst_.findLink(route[i], route[i+1], &handleToFoundLS);
++		if(LSFoundFlag == FALSE) {	// New one
++			(agent_->iarpAgt_).lsLst_.addLink(route[i], route[i+1], -1, LINKUP, now+routeLifeTime_);
++			LSTChangeFlag = TRUE;
++		} else {			// Existing One
++			if(handleToFoundLS->isup_ == LINKDOWN) {
++				LSTChangeFlag = TRUE;
++			}
++			handleToFoundLS->isup_ = LINKUP;		// Update Attributes - Link-State
++			handleToFoundLS->expiry_ = now+routeLifeTime_;// Update Attributes - Expiry Time
++		}
++	}
++
++	// If there is a change in Link-State-Table, then rebuild the routing table.
++	if(LSTChangeFlag == TRUE) {
++		(agent_->iarpAgt_).buildRoutingTable();	  	// Rebuild Routing Table
++		//agent_->route_SendBuffer_pkt();	// Send Buffered packets... [Its done at callee function]
++	}
++	
++	return LSTChangeFlag;
++}
++
++int 
++IERPAgent::removeLinkStateFromBrokenRoute(nsaddr_t lnkSrc, nsaddr_t lnkDest) {
++	// Remove the broken link from the link-state-list if it exists.
++	LinkState *handleToFoundLS=NULL;
++	int LSFoundFlag=FALSE;
++	LSFoundFlag = (agent_->iarpAgt_).lsLst_.findLink(lnkSrc, lnkDest, &handleToFoundLS);
++
++	// If there is a change in Link-State-Table, then rebuild the routing table.
++	if(LSFoundFlag  == TRUE) {
++		handleToFoundLS->isup_ = LINKDOWN;	  // Set the link-stauts = DOWN 
++		(agent_->iarpAgt_).buildRoutingTable();	  	// Rebuild Routing Table
++	}
++	
++	return LSFoundFlag;
++}
++
++/* 6. Receiving IERP-route-reply. */
++void 
++IERPAgent::recv_IERP_ROUTE_REPLY(Packet* p) {
++	hdr_ip *hdrip = HDR_IP(p);
++	hdr_cmn *hdrc = HDR_CMN(p);
++	hdr_zrp *hdrz = HDR_ZRP(p);
++					if(DEBUG) { // [Log: RECV_IERP_REPLY]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | RECV_IERP_REPLY | -S %d -D %d | -IS %d -ID %d | -QID %d | ",
++					agent_->myaddr_, now, hdrz->src_, hdrz->dest_, hdrip->saddr(), hdrip->daddr(),
++					hdrz->queryID_);	
++					(agent_->pktUtil_).pkt_print_route(p); agent_->print_tables(); printf("\n");
++					} // [Log: End]
++	Time now = Scheduler::instance().clock(); // get the time
++	// [Task-1]: (IF) I am the Source.. [Store the route in OUTER-ROUTE-LIST - 
++	//				   2-Cases: 1) Enter New Route; OR 2)Replace the old One(If new one is better)]
++	if(hdrz->src_ == agent_->myaddr_) {	// MEANS - I have intitated the Query
++		// [SubTask-1]: Adding this info to topology table...
++		int routingTableUpdatedFlag=FALSE;
++		routingTableUpdatedFlag = addLinkStateFromRoute(hdrz->route_, hdrz->routelength_);
++		if(routingTableUpdatedFlag == TRUE) {
++			agent_->route_SendBuffer_pkt();	// Send Buffered packets...
++		}
++		// [SubTask-2]: Delete the query from Sent_Query_List
++		SentQuery *handleToFoundSQ = NULL;
++		int foundSQFlag;
++		foundSQFlag = sqLst_.findQuery(hdrz->src_, hdrz->dest_, &handleToFoundSQ);
++		if(foundSQFlag == TRUE) {	// Remove the Entry
++			sqLst_.removeQuery(hdrz->src_, hdrz->dest_);
++		}
++		// [SubTask-3]: Drop the packet
++		(agent_->pktUtil_).pkt_drop(p);
++	// [Task-2]: (ELSE) Forward it along the Route (Backwards) [No need to generate new packet]
++	} else {
++		// Snooping the forwarding replies.. Adding this info into topology table.
++		if(IERP_REPLY_SNOOP) {
++			int routingTableUpdatedFlag=FALSE;
++			routingTableUpdatedFlag = addLinkStateFromRoute(hdrz->route_, hdrz->routelength_);
++			if(routingTableUpdatedFlag == TRUE) {
++				agent_->route_SendBuffer_pkt();	// Send Buffered packets...
++			}
++		}
++		// Forward it along the Route (Backwards) [No need to generate new packet]
++		hdrz->routeindex_--;	// Move 1 hop (PREV) into the route(Should be My address)
++		assert(hdrz->route_[hdrz->routeindex_] == agent_->myaddr_); assert(hdrz->routeindex_-1 >= 0);
++		hdrc->direction() = hdr_cmn::DOWN;
++		hdrip->saddr() = agent_->myaddr_;
++		hdrip->daddr() = hdrz->route_[hdrz->routeindex_-1];	// Previous hop in the route	
++		(agent_->pktUtil_).pkt_send(p, hdrip->daddr(), 0.00);
++					if(DEBUG) { // [Log: XMIT_IERP_REPLY]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | XMIT_IERP_REPLY | -S %d -D %d | -IS %d -ID %d | -QID %d | ",
++					agent_->myaddr_, now, hdrz->src_, hdrz->dest_, hdrip->saddr(), hdrip->daddr(),
++					hdrz->queryID_);
++					(agent_->pktUtil_).pkt_print_route(p); agent_->print_tables(); printf("\n");
++					} // [Log: End]
++	}
++}
++
++/* 7. Receiving IERP-route-error. */
++void
++IERPAgent::recv_IERP_ROUTE_ERROR(Packet* p) {
++	// [Task-1]: (IF) I am the Source.. [Discard the route in OUTER-ROUTE-LIST]
++	hdr_cmn *hdrc = HDR_CMN(p);
++	hdr_zrp *hdrz = HDR_ZRP(p);
++	hdr_ip *hdrip = HDR_IP(p);
++					if(DEBUG) { // [Log: RECV_IERP_ERROR]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | RECV_IERP_ERROR | -S %d -D %d | -IS %d -ID %d | -SEQ %d | ",
++					agent_->myaddr_, now, hdrz->src_, hdrz->dest_, hdrip->saddr(), hdrip->daddr(),
++					hdrz->seq_);
++					(agent_->pktUtil_).pkt_print_route(p); agent_->print_tables(); printf("\n");
++					} // [Log: End]
++	if(hdrz->src_ == agent_->myaddr_) {	// I am the Source...
++		// [SubTask-1]: Remove the broken link info from topology table.
++		removeLinkStateFromBrokenRoute(hdrz->links_[0].src_, hdrz->links_[0].dest_);
++		// [SubTask-2]: Drop the packet
++		(agent_->pktUtil_).pkt_drop(p);
++	// [Task-2]: (ELSE) Forward it along the Route (Backwards) [No need to generate new packet]
++	} else {
++		if(IERP_ERROR_SNOOP) {
++			// Remove the broken link info from topology table.
++			removeLinkStateFromBrokenRoute(hdrz->links_[0].src_, hdrz->links_[0].dest_);
++		}
++		hdrz->routeindex_--;	// Move 1 hop (PREV) into the route(Should be My address)
++		assert(hdrz->route_[hdrz->routeindex_] == agent_->myaddr_); assert(hdrz->routeindex_-1 >= 0);
++		hdrc->direction() = hdr_cmn::DOWN;
++		hdrip->saddr() = agent_->myaddr_;
++		hdrip->daddr() = hdrz->route_[hdrz->routeindex_-1];
++		(agent_->pktUtil_).pkt_send(p, hdrip->daddr(), 0.00);
++					if(DEBUG) { // [Log: RECV_IERP_ERROR]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | RECV_IERP_ERROR | -S %d -D %d | -IS %d -ID %d | -SEQ %d | ",
++					agent_->myaddr_, now, hdrz->src_, hdrz->dest_, hdrip->saddr(), hdrip->daddr(),
++					hdrz->seq_);
++					(agent_->pktUtil_).pkt_print_route(p); agent_->print_tables(); printf("\n");
++					} // [Log: End]
++	}
++}
++
++/* 8. Receiving IERP-route-data. */
++void 
++IERPAgent::recv_IERP_DATA(Packet* p) {
++  	hdr_ip *hdrip = HDR_IP(p);
++  	hdr_cmn *hdrc = HDR_CMN(p);
++  	hdr_zrp *hdrz = HDR_ZRP(p);
++					if(DEBUG) { // [Log: RECV_IERP_DATA]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | RECV_IERP_DATA | -S %d -D %d | -IS %d -ID %d | -SEQ %d | ",
++					agent_->myaddr_, now, hdrz->src_, hdrz->dest_, hdrip->saddr(), hdrip->daddr(),
++					hdrz->seq_);	
++					(agent_->pktUtil_).pkt_print_route(p); agent_->print_tables(); printf("\n");
++					} // [Log: End]
++	// [Task-1]: (IF) I am the Destination.. Forward packet to above Layer
++	if(hdrz->dest_ == agent_->myaddr_) {
++					if(DEBUG) { // [Log: RECV_CBR_DATA]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | RECV_CBR_DATA | -S %d -D %d | -SEQ %d -Type IERP -Delay %6.6f | ",
++					agent_->myaddr_, now, hdrz->src_, hdrz->dest_, hdrz->seq_, now-hdrz->pktsent_);
++					(agent_->pktUtil_).pkt_print_route(p); printf("\n");
++					} // [Log: End]
++		// Delete the route info from the packet [Not Needed Anymore]
++		(agent_->pktUtil_).pkt_free_ROUTE_space(p);
++		// copy ecnapsulated data back to this packet
++		hdrc->ptype() = hdrz->enc_ptype_;
++		hdrc->direction() = hdr_cmn::UP; 	// and is sent up
++		hdrc->addr_type_ = NS_AF_NONE;
++		hdrc->size() -= IP_HDR_LEN;  		//  set default packet size
++		hdrip->dport() = hdrz->enc_dport_;
++		hdrip->saddr() = hdrz->src_;
++		hdrip->daddr() = hdrz->dest_;
++		hdrip->ttl() = 1;
++		(agent_->pktUtil_).pkt_send(p, agent_->myaddr_, 0.00);
++	// [Task-2]: (ELSE) Forward it along the Route (Forward) [No need to generate new packet]
++	} else {
++		hdrz->routeindex_++;	// Move 1 hop (FORWARD) into the route(Should be My address)
++		assert(hdrz->route_[hdrz->routeindex_] == agent_->myaddr_); assert(hdrz->routeindex_+1 < hdrz->routelength_);
++		hdrc->direction() = hdr_cmn::DOWN;
++		hdrip->saddr() = agent_->myaddr_;
++		hdrip->daddr() = hdrz->route_[hdrz->routeindex_+1];
++		(agent_->pktUtil_).pkt_send(p, hdrip->daddr(), 0.00);
++					if(DEBUG) { // [Log: XMIT_IERP_DATA]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | XMIT_IERP_DATA | -S %d -D %d | -IS %d -ID %d | -SEQ %d | ",
++					agent_->myaddr_, now, hdrz->src_, hdrz->dest_, hdrip->saddr(), hdrip->daddr(),
++					hdrz->seq_);	
++					(agent_->pktUtil_).pkt_print_route(p); agent_->print_tables(); printf("\n");
++					} // [Log: End]
++	}
++}
++
++/* 9. Print all Tables. */
++void 
++IERPAgent::print_tables() {
++
++}
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++/* [SECTION-4]--------------------------------------------------------------------------------------------------------------
++ * ZRP (ZONE ROUTING PROTOCOL):- SUBSECTIONS CONTAINS FOLLOWING THINGS:
++ *	1) MAC-FAILURE DETECTION	(Mac-failure notification function)
++ *	2) TCL RELATED CLASSES/FUNCTIONS
++ *	3) PACKET UTILITIES CLASS	(Packet Related Utilities)
++ *	4) SEND BUFFER			(Buffer to store un-delivered Upper-layer Packets)
++ *	5) ZRP AGENT			(Zone Routing Agent)
++ * -------------------------------------------------------------------------------------------------------------------------
++ * [SUB-SECTION-4.1]--------------------------------------------------------------------------------------------------------
++ * MAC-FAILURE DETECTION:- MAC-FAILURE NOTIFICATION FUNCTION.
++ * -------------------------------------------------------------------------------------------------------------------------
++ */
++/* A wrapper to call a routine on Mac Failure Event. */
++static void 
++zrp_xmit_failure_callback(Packet *p, void *arg) {
++	ZRPAgent *agent = (ZRPAgent *)arg; // cast of trust
++	agent->mac_failed(p);
++}
++
++
++
++
++
++/* [SUB-SECTION-4.2]--------------------------------------------------------------------------------------------------------
++ * TCL RELATED CLASSES/FUNCTIONS:-
++ * -------------------------------------------------------------------------------------------------------------------------
++ */
++/* A supporting function used in finding the ZRP header in a packet. */
++int hdr_zrp::offset_;
++static class ZRPHeaderClass : public PacketHeaderClass {
++  public:
++  	ZRPHeaderClass() : PacketHeaderClass("PacketHeader/ZRP", sizeof(hdr_zrp)) {
++          	bind_offset(&hdr_zrp::offset_);
++	}
++	void export_offsets() {
++		field_offset("zrptype_", OFFSET(hdr_zrp, zrptype_));
++		field_offset("src_", OFFSET(hdr_zrp, src_));
++		field_offset("dest_", OFFSET(hdr_zrp, dest_));
++		field_offset("seq_", OFFSET(hdr_zrp, seq_));
++		field_offset("queryID_", OFFSET(hdr_zrp, queryID_));
++		field_offset("lastbc_", OFFSET(hdr_zrp, lastbc_));
++	}
++}class_zrp_hdr;
++
++/* A binding between ZRP and TCL, you will most likely not change this. */
++static class ZRPClass : public TclClass {
++  public:
++	ZRPClass() : TclClass("Agent/ZRP") {}
++	TclObject* create(int argc, const char*const* argv) {
++		return(new ZRPAgent((nsaddr_t) atoi(argv[4])));
++		// Tcl code will attach me and then pass in addr to me
++		// see tcl/lib/ns-lib.tcl, under create-zrp-agent,
++		// is done by "set ragent [new Agent/ZRP [$node id]]"
++	}
++} class_zrp;
++
++
++
++
++
++/* [SUB-SECTION-4.3]--------------------------------------------------------------------------------------------------------
++ * PACKET UTILITIES CLASS:- PACKET RELATED UTILITIES
++ * -------------------------------------------------------------------------------------------------------------------------
++ */
++/* 1. Creates a fresh new packet and initializes as much as it knows how. */
++Packet* 
++PacketUtil::pkt_create(ZRPTYPE zrp_type, nsaddr_t addressee, int ttl)
++{
++	Time now = Scheduler::instance().clock(); // get the time
++  	Packet *p = agent_->Myallocpkt(); // fresh new packet
++
++	hdr_ip *hdrip = HDR_IP(p);
++  	hdr_cmn *hdrc = HDR_CMN(p);
++  	hdr_zrp *hdrz = HDR_ZRP(p);
++
++	// Common Header
++  	hdrc->ptype() = PT_ZRP;   	// ZRP pkt type
++  	hdrc->next_hop() = addressee;  
++	hdrc->direction() = hdr_cmn::DOWN;	// Sending packets DOWN
++  	hdrc->addr_type_ = NS_AF_NONE;
++  	hdrc->size() = IP_HDR_LEN;  	//  set default packet size
++	// IP Header
++  	hdrip->ttl() = ttl;
++  	hdrip->saddr() = agent_->myaddr_;       // source address
++  	hdrip->sport() = ROUTER_PORT;   // source port
++  	hdrip->daddr() = addressee;     // dest address
++  	hdrip->dport() = ROUTER_PORT;   // dest port
++	// ZRP Header
++  	hdrz->zrptype_ = zrp_type;      // which zrp pkt am I?
++	hdrz->pktsent_ = now;		// Packet Sending Time
++	hdrz->radius_ = agent_->radius_;// Sender's Radius
++  	hdrz->seq_ = seq_;              // copy from gobal sequence counter
++  	hdrz->forwarded_ = 0;           // have not been forwarded before
++  	hdrz->src_ = agent_->myaddr_;   // I am originator, this is used by NDP/IARP
++	hdrz->dest_ = addressee;	// dest address
++	hdrz->links_ = NULL;		// Nothing in IARP Update
++	hdrz->numlinks_ = 0;		//	"	"	 		
++	hdrz->mcLst_ = NULL;		// Addresses to Multicast
++	hdrz->mcLstSize_ = 0;		// Number of addresses to Multicast
++	hdrz->lastbc_ = -1;		// '-1' is an invalid address 
++	hdrz->route_ = NULL;		// Nothing in IERP Route
++	hdrz->routelength_ = 0;		// 	" 	"
++  	hdrz->routeindex_ = 0;          // where in the route list am I sending ?
++	hdrz->queryID_ = -1;		// Invalid Query ID
++
++	inc_seq(); 			// increments global sequence counter
++
++	return(p);
++}
++
++/* 2. Copy an entire packet to another. */
++void
++PacketUtil::pkt_copy(Packet *pfrom, Packet *pto) {
++  	hdr_cmn *hdrcfrom = HDR_CMN(pfrom);
++  	hdr_ip *hdripfrom = HDR_IP(pfrom);
++  	hdr_zrp *hdrzfrom = HDR_ZRP(pfrom);
++
++  	hdr_cmn *hdrcto = HDR_CMN(pto);
++  	hdr_ip *hdripto = HDR_IP(pto);
++  	hdr_zrp *hdrzto = HDR_ZRP(pto);
++
++	// Common Header
++  	hdrcto->direction() = hdrcfrom->direction();
++  	hdrcto->ptype() = hdrcfrom->ptype();
++  	hdrcto->next_hop() = hdrcfrom->next_hop();
++  	hdrcto->addr_type_ = hdrcfrom->addr_type_;
++  	hdrcto->size() = hdrcfrom->size() ;
++	// IP Header
++  	hdripto->ttl() = hdripfrom->ttl();
++  	hdripto->saddr() = hdripfrom->saddr();
++  	hdripto->sport() = hdripfrom->sport();
++  	hdripto->daddr() =  hdripfrom->daddr();
++  	hdripto->dport() = hdripfrom->dport();
++	// ZRP Header
++  	hdrzto->zrptype_ = hdrzfrom->zrptype_;
++  	hdrzto->pktsent_ = hdrzfrom->pktsent_;
++  	hdrzto->radius_ = hdrzfrom->radius_;
++  	hdrzto->seq_ = hdrzfrom->seq_;
++  	hdrzto->forwarded_ = hdrzfrom->forwarded_;
++  	hdrzto->src_ = hdrzfrom->src_;
++  	hdrzto->dest_ = hdrzfrom->dest_;
++  	hdrzto->numlinks_ = hdrzfrom->numlinks_;
++	hdrzto->mcLstSize_ = hdrzfrom->mcLstSize_;
++  	hdrzto->routelength_ = hdrzfrom->routelength_;
++  	hdrzto->lastbc_ = hdrzfrom->lastbc_;
++	hdrzto->queryID_ = hdrzfrom->queryID_;
++	hdrzto->routeindex_ = hdrzfrom->routeindex_;
++  	hdrzto->enc_dport_ = hdrzfrom->enc_dport_;
++  	hdrzto->enc_daddr_ = hdrzfrom->enc_daddr_;
++  	hdrzto->enc_ptype_ = hdrzfrom->enc_ptype_;
++  	
++	// Filling LSUs...
++	pkt_add_LSU_space(pto, hdrzfrom->numlinks_);		// If zero, No memory is allocated
++	for(int i=0; i<hdrzfrom->numlinks_; i++) {	
++		hdrzto->links_[i].src_ = hdrzfrom->links_[i].src_;
++		hdrzto->links_[i].dest_ = hdrzfrom->links_[i].dest_;
++		hdrzto->links_[i].isUp_ = hdrzfrom->links_[i].isUp_;	
++	}
++	
++	// Filling Route...
++	pkt_add_ROUTE_space(pto, hdrzfrom->routelength_); 	// If zero, No memory is allocated
++	for(int i=0; i<hdrzfrom->routelength_; i++) {	
++		hdrzto->route_[i] = hdrzfrom->route_[i];
++	}
++	
++	// Filling Multi-Cast List
++	pkt_add_ADDRESS_space(pto, hdrzfrom->mcLstSize_);	// If zero, No memory is allocated
++	for(int i=0; i<hdrzfrom->mcLstSize_; i++) {
++		hdrzto->mcLst_[i] = hdrzfrom->mcLst_[i];
++	}
++}
++
++/* 3. Send packet, ie schedule it for sometime in future to target_ of ZRP, 
++   which is handled by LL. This is unicast only to "addressee" */
++void 
++PacketUtil::pkt_send(Packet* p, nsaddr_t addressee, Time delay) {
++  	hdr_ip *hdrip = HDR_IP(p);
++  	hdr_cmn *hdrc = HDR_CMN(p);
++	hdr_zrp *hdrz = HDR_ZRP(p);
++	// 1. For Mac Failure
++	hdrc->xmit_failure_ = zrp_xmit_failure_callback;
++	hdrc->xmit_failure_data_ = (void*)agent_;	
++  	// 2. set next hop and dest to addressee
++	if(hdrz->zrptype_ == IARP_DATA || hdrz->zrptype_ == IERP_DATA) {
++		if(agent_->myaddr_ == hdrz->src_) {
++			hdrc->size() += hdrz->size();
++		}
++	}
++	else {
++		hdrc->size() = IP_HDR_LEN + hdrz->size();	// Adding the header length...
++	}
++  	hdrc->next_hop() = addressee;	// UNICAST...
++  	hdrip->daddr() = addressee;	// UNICAST...
++  	// 3. transmit, no delay
++	agent_->XmitPacket(p, delay);	// No jitter
++	agent_->tx_++; 			// increment pkt transmitted counter
++}
++
++/* 4.Broadcast packet to all neighbors. */
++void 
++PacketUtil::pkt_broadcast(Packet *p, Time randomJitter) {
++	hdr_ip *hdrip = HDR_IP(p);
++	hdr_cmn *hdrc = HDR_CMN(p);
++	hdr_zrp *hdrz = HDR_ZRP(p);
++  	// 1. set next hop and dest to addressee
++	if(hdrz->zrptype_ == IARP_DATA || hdrz->zrptype_ == IERP_DATA) {
++		if(agent_->myaddr_ == hdrz->src_) {
++			hdrc->size() += hdrz->size();
++		}
++	}
++	else {
++		hdrc->size() = IP_HDR_LEN + hdrz->size();	// Adding the header length...
++	}
++	hdrc->next_hop() = IP_BROADCAST;// BROADCAST...
++	hdrip->daddr() = IP_BROADCAST;	// BROADCAST...
++  	// 2. transmit, with delay
++	agent_->XmitPacket(p, randomJitter);
++  	agent_->tx_++; 			// increment pkt transmitted counter
++}
++
++/* 5. Adds Link-space in the Packet. */
++void 
++PacketUtil::pkt_add_LSU_space(Packet *p, int size) {
++	// 1. If some previous allocation is there then delete it...
++  	hdr_zrp *hdrz = HDR_ZRP(p);
++	if (hdrz->links_ != NULL) {
++		delete [] (hdrz->links_);
++		hdrz->links_ = NULL;
++	}
++			
++	// 2. Allocate Memory...
++	if(size>0) {
++		hdrz->links_ = new LSU[size];
++		if(hdrz->links_==NULL) {
++			printf("### Memory Allocation Error in [PacketUtil::pkt_add_LSU_space] ###");
++		}
++	}
++}
++
++/* 6. Frees Link-space in the Packet. [Not using because of memory corruption at MAC layer] */
++void 
++PacketUtil::pkt_free_LSU_space(Packet *p) {
++	/*// If some previous allocation is there then delete it...
++  	hdr_zrp *hdrz = HDR_ZRP(p);
++	if (hdrz->links_ != NULL) {
++		delete [] (hdrz->links_);
++		hdrz->links_ = NULL;
++	}*/
++}
++
++/* 7. Adds Route-space in the Packet. */
++void 
++PacketUtil::pkt_add_ROUTE_space(Packet *p, int size) {
++	// 1. If some previous allocation is there then delete it...
++  	hdr_zrp *hdrz = HDR_ZRP(p);	
++	if (hdrz->route_ != NULL) {
++		delete [] (hdrz->route_);
++		hdrz->route_ = NULL;
++	}
++			
++	// 2. Allocate Memory...
++	if(size>0) {
++		hdrz->route_ = new nsaddr_t[size];
++		if(hdrz->route_==NULL) {
++			printf("### Memory Allocation Error in [PacketUtil::pkt_add_ROUTE_space] ###");
++		}
++	}
++}
++
++/* 8. Frees Route-space in the Packet. */
++void 
++PacketUtil::pkt_free_ROUTE_space(Packet *p) {
++	/*// If some previous allocation is there then delete it...
++  	hdr_zrp *hdrz = HDR_ZRP(p);	
++	if (hdrz->route_ != NULL) {
++		delete [] (hdrz->route_);
++		hdrz->route_ = NULL;
++	}*/
++}
++
++/* 9. Adds Multicast-Address-space in the Packet. */
++void 
++PacketUtil::pkt_add_ADDRESS_space(Packet *p, int size) {
++	// 1. If some previous allocation is there then delete it...
++  	hdr_zrp *hdrz = HDR_ZRP(p);	
++	if (hdrz->mcLst_ != NULL) {
++		delete [] (hdrz->mcLst_);
++		hdrz->mcLst_ = NULL;
++	}
++			
++	// 2. Allocate Memory...
++	if(size>0) {
++		hdrz->mcLst_ = new nsaddr_t[size];
++		if(hdrz->mcLst_==NULL) {
++			printf("### Memory Allocation Error in [PacketUtil::pkt_add_ADDRESS_space] ###");
++		}
++	}
++}
++
++/* 10. Frees Multicast-Address-space in the Packet. */
++void 
++PacketUtil::pkt_free_ADDRESS_space(Packet *p) {
++	/*// If some previous allocation is there then delete it...
++  	hdr_zrp *hdrz = HDR_ZRP(p);	
++	if (hdrz->mcLst_ != NULL) {
++		delete [] (hdrz->mcLst_);
++		hdrz->mcLst_ = NULL;
++	}*/
++}
++
++/* 11. Checks if 'addressToCheck' is on Multicast list or not. */
++int 
++PacketUtil::pkt_AmIMultiCastReciver(Packet *p, nsaddr_t addressToCheck) {
++	hdr_zrp *hdrz = HDR_ZRP(p);
++	// 1. If list is EMPTY, return FALSE.
++	if(hdrz->mcLstSize_ == 0) {
++		return FALSE;
++	}
++	// 2. Search for the address.
++	int foundFlag = FALSE;
++	for(int i=0; i<hdrz->mcLstSize_; i++) {
++		if(hdrz->mcLst_[i] == addressToCheck) {
++			foundFlag = TRUE;
++			break;
++		}
++	}
++	return foundFlag;
++}
++
++/* 12. Find if the asked Address is in the route of the packet or not. */
++int 
++PacketUtil::pkt_AmIOnTheRoute(Packet *p, nsaddr_t addressToCheck) {
++	hdr_zrp *hdrz = HDR_ZRP(p);
++	int foundFlag=FALSE;
++	if(hdrz->routelength_ == 0) {
++		return FALSE;
++	}
++
++	for(int i=0; i<hdrz->routelength_; i++) {
++		if(addressToCheck == hdrz->route_[i]) {
++			foundFlag = TRUE;
++			break;
++		}
++	}
++	return foundFlag;
++}
++
++/* 13. Print all links contained in the Packet. */
++void 
++PacketUtil::pkt_print_links(Packet *p) {
++	hdr_zrp *hdrz = HDR_ZRP(p);
++	printf("| Packet contains Links: ");
++	if(hdrz->numlinks_ <= 0) {
++		printf("None. |");
++	} else {
++		for(int i=0; i<hdrz->numlinks_; i++) {
++			if (hdrz->links_[i].isUp_ == LINKUP) {	// UP link
++				printf("[%d=%d], ",hdrz->links_[i].src_, hdrz->links_[i].dest_); 
++			} else {				// DOWN link
++				printf("[%d#%d], ",hdrz->links_[i].src_, hdrz->links_[i].dest_); 
++			}
++		}
++		printf("|");
++	}
++}
++
++/* 14. Print route contained in the Packet.*/
++void 
++PacketUtil::pkt_print_route(Packet *p) {
++	hdr_zrp *hdrz = HDR_ZRP(p);
++	printf("| Packet contains Route: [");
++	if(hdrz->routelength_ <= 0) {
++		printf("Empty] |");
++	} else {
++		for(int i=0; i<hdrz->routelength_; i++) {
++			if(hdrz->routeindex_ == i) {	// Highlighting Route_index field
++				printf(" (%d)", hdrz->route_[i]);
++			} else {
++				printf(" %d", hdrz->route_[i]);
++			}
++		}
++		printf("] |");
++	}
++}
++
++/* 15. Drop the Packet. */
++void 
++PacketUtil::pkt_drop(Packet *p) {
++	Packet::free(p);
++	/*hdr_zrp *hdrz = HDR_ZRP(p);
++	switch(hdrz->zrptype_) {
++		case NDP_BEACON:
++		case NDP_BEACON_ACK:
++			Packet::free(p);
++		break;	
++	}*/
++}
++
++
++
++
++
++
++/* [SUB-SECTION-4.4]--------------------------------------------------------------------------------------------------------
++ * SEND BUFFER:- BUFFER TO STORE UN-DELIVERED UPPER-LAYER PACKETS
++ * -------------------------------------------------------------------------------------------------------------------------
++ */
++
++/* 1. Add Packet at the head. */
++void 
++SendBuffer::addPacket(Packet *pkt, nsaddr_t dest, Time expiry) {
++	SendBufferEntry *newPkt = new SendBufferEntry(pkt, dest, expiry); // Create a new Entry
++	if(newPkt == NULL) {	// Check for Allocation Error
++		printf("### Memory Allocation Error in [SendBuffer::addPacket] ###");
++		exit(0);
++	}
++	newPkt->next_ = head_;	// Made necessary Joinings			
++	head_ = newPkt;
++	numPackets_++;		// Increment Number of Packets
++}
++
++/* 2. Remove all Expired-Packets. */
++void 
++SendBuffer::purgeExpiredPackets() {
++	if(numPackets_ == 0) {
++		return;		// Nothing to do
++	}
++	// [case-1]: Leaving the 1st case(head_ case)
++	SendBufferEntry *prev, *cur;
++	prev = head_;
++	cur = head_->next_;
++  	Time now = Scheduler::instance().clock(); 	// get the time
++	for(int i=1; cur!=NULL; i++) {
++		if(cur->expiry_<now) { 		// Delete the Expired-Packet
++			prev->next_ = cur->next_;
++			SendBufferEntry *toBeDeleted = cur;
++			cur = cur->next_;
++			assert(toBeDeleted->pkt_ != NULL);
++			agent_->Mydrop(toBeDeleted->pkt_, DROP_RTR_QTIMEOUT);	// drops the packet
++			//Packet::free(toBeDeleted->pkt_); // Not needed anymore
++			delete toBeDeleted;
++			numPackets_--;		// Decrement Number of Packets
++		} else {
++			prev = cur;		// Advance the Pointers
++			cur = cur->next_;				
++		}
++	}
++	
++	// [case-2]: head_ case...
++	if(head_!=NULL) {
++		if(head_->expiry_<now) {
++			SendBufferEntry *toBeDeleted = head_;
++			head_ = head_->next_;
++			assert(toBeDeleted->pkt_ != NULL);
++			agent_->Mydrop(toBeDeleted->pkt_, DROP_RTR_QTIMEOUT);	// drops the packet
++			//Packet::free(toBeDeleted->pkt_); // Not needed anymore
++			delete toBeDeleted;
++			numPackets_--;		// Decrement Number of Packets
++		}
++	}
++	
++}
++
++/* 3. Empty the Buffer. */
++void 
++SendBuffer::freeList() {
++	if(numPackets_==0) {
++		return;
++	}
++	
++	SendBufferEntry *cur, *toBeDeleted;
++	cur = head_;
++	for(int i=0; i<numPackets_; i++) {
++		toBeDeleted = cur;
++		assert(toBeDeleted->pkt_ != NULL);
++		Packet::free(toBeDeleted->pkt_); // Not needed anymore
++		cur = cur->next_;
++		delete toBeDeleted;
++	}
++
++	head_ = NULL;
++	numPackets_ = 0;
++}
++
++
++
++
++
++/* [SUB-SECTION-4.5]--------------------------------------------------------------------------------------------------------
++ * ZRP AGENT:- ZONE ROUTING AGENT
++ * -------------------------------------------------------------------------------------------------------------------------
++ */
++
++/* 1. Constructors [Default Constructor] */
++ZRPAgent::ZRPAgent() :	Agent(PT_ZRP), myid_('\0'), myaddr_(0), radius_(DEFAULT_ZONE_RADIUS),
++			sendBuf_(this), pktUtil_(this), ndpAgt_(this), iarpAgt_(this), ierpAgt_(this) {
++	myaddr_= this->addr(); // This might not give anything useful back,
++  	// I do not know my own address, my node does, have to wait for Tcl
++  	// to connect us and give my my id
++  	myid_ = Address::instance().print_nodeaddr(myaddr_);
++  	//bind("radius_", (int*)&radius_);
++
++	// Setting the radius
++	Tcl& tcl = Tcl::instance();
++	tcl.evalf("Agent/ZRP set radius_");
++	if (strcmp(tcl.result(), "0") != 0) {
++		bind("radius_", &radius_);
++	}
++}
++
++/* 2. Constructors [Parameterized Constructor] */
++ZRPAgent::ZRPAgent(nsaddr_t id) : Agent(PT_ZRP), myid_('\0'), myaddr_(id), radius_(DEFAULT_ZONE_RADIUS),
++				  sendBuf_(this), pktUtil_(this), ndpAgt_(this), iarpAgt_(this), ierpAgt_(this) {
++	// initialize my address, both int and string forms
++	// my node knows its id, but I (ragent) didn't until now (I think?)
++	myid_ = Address::instance().print_nodeaddr(myaddr_);
++
++	// Setting the radius
++	Tcl& tcl = Tcl::instance();
++	tcl.evalf("Agent/ZRP set radius_");
++	if (strcmp(tcl.result(), "0") != 0) {
++		bind("radius_", &radius_);
++	}
++
++	Time now = Scheduler::instance().clock(); // get the time
++	
++	tx_=0; // initialize counter for transmitted packets
++	rx_=0; // initialize counter for received packets
++	queryID_ = 1; // initialize query id with 1
++
++	// This ZRPAgent was just created.
++	//printf("\n_%d_ [%6.6f] | Node %d was created. ", myaddr_, (float)now, myaddr_);
++	//print_tables();	printf("\n");
++}
++
++/* 3. Start Up Function(s). */
++void 
++ZRPAgent::startUp() {
++	// Clear the send buffer...
++	sendBuf_.freeList();
++	// Start all Sub-Agents...
++	ndpAgt_.startUp();
++	iarpAgt_.startUp();
++	ierpAgt_.startUp();
++}
++
++/* 4. TCL interface. */
++int 
++ZRPAgent::command (int argc, const char*const* argv) {
++	Time now = Scheduler::instance().clock(); 		// get the time
++	// [First set: if argc == 2]
++	if (argc == 2) { // No argument from TCL
++		if (strcmp (argv[1], "start") == 0) { // Init ZRP Agent
++			startUp();
++      			return (TCL_OK);
++    		} else if (strcasecmp (argv[1], "ll-queue") == 0) { // who is my ll	//[There is no argv[2] here ??]
++      			if (!(ll_queue = (PriQueue *) TclObject::lookup (argv[2]))) {
++				fprintf (stderr, "ZRP_Agent: ll-queue lookup "
++		 		"of %s failed\n", argv[2]);
++				return TCL_ERROR;
++      			}
++      			return TCL_OK; 
++    		}
++    	// [Second set: if argc == 3]
++	} else if (argc == 3)   { // One argument from TCL		// [Parameter 1 - RADIUS]
++    		if (strcasecmp (argv[1], "radius") == 0) {		// change the radius, takes (int) num hops
++      			int temp;
++      			temp = atoi(argv[2]);
++      			if (temp > 0) { // don't change radius unless input is valid value
++				printf("_%2d_ [%6.6f] | Radius change from %d to %d ",myaddr_, now,
++		       		radius_, temp);
++				print_tables(); printf("\n");
++				radius_ = temp;
++      			}
++      			return TCL_OK;
++    		}							// [Parameter 2 - MIN_BEACON_PERIOD]
++    		if (strcasecmp (argv[1], "beacon_period") == 0) {	// change beacon period, takes (int) number of secs
++      			int temp;
++      			temp = atoi(argv[2]);
++      			if (temp > 0) { // don't change unless input is valid value
++				printf("_%2d_ [%6.6f] | Beacon period change from %d to %d ",
++	       			myaddr_,now, ndpAgt_.BeaconTransmitTimer_.beacon_period_, temp);
++				print_tables(); printf("\n");
++				ndpAgt_.BeaconTransmitTimer_.beacon_period_ = temp;
++      			}
++      			return TCL_OK;
++    		}/*
++    		// change beacon period jitter, takes (int) number of secs
++    		if (strcasecmp (argv[1], "beacon_period_jitter") == 0) { 
++      			int temp;
++      			temp = atoi(argv[2]);
++      			if (temp > 0) { // don't change unless input is valid value
++				printf("_%2d_ [%6.6f] | Beacon period jitter change from %d to %d ",
++	       			myaddr_,now, beacon_period_jitter_, temp);
++				print_tables();
++				printf("\n");
++				beacon_period_jitter_ = temp;
++      			}
++      			return TCL_OK;
++    		}
++    		// change neighbor timeout, takes (int) number of secs    
++    		if (strcasecmp (argv[1], "neighbor_timeout") == 0) {
++      			int temp;
++      			temp = atoi(argv[2]);
++      			if (temp > 0) { // don't change unless input is valid value
++				printf("_%2d_ [%6.6f] | Neighbor timeout change from %d to %d ",
++	       			myaddr_,now, neighbor_timeout_, temp);
++				print_tables();
++				printf("\n");
++				neighbor_timeout_ = temp;
++      			}
++      			return TCL_OK;
++    		}
++    		// change neighbor ack timeout, takes (int) number of secs    
++    		if (strcasecmp (argv[1], "neighbor_ack_timeout") == 0) {
++      			int temp;
++      			temp = atoi(argv[2]);
++      			if (temp > 0) { // don't change unless input is valid value
++				printf("_%2d_ [%6.6f] | Neighbor timeout change from %d to %d ",
++	       			myaddr_,now, neighbor_ack_timeout_, temp);
++				print_tables();
++				printf("\n");
++				neighbor_ack_timeout_ = temp;
++      			}
++      			return TCL_OK;
++    		}*/
++    		// resets myid_ to correct address
++    		if (strcasecmp (argv[1], "addr") == 0) {
++      			//char str;
++      			myaddr_ = Address::instance().str2addr(argv[2]);
++      			delete myid_; // remove old string @ myid_, avoid memory leak
++      			myid_ = Address::instance().print_nodeaddr(myaddr_);
++      			return TCL_OK;
++    		}
++    		// Error if we cannot find TclObject
++    		TclObject *obj;
++    		if ((obj = TclObject::lookup (argv[2])) == 0) {
++      			fprintf (stderr, "%s: %s lookup of %s failed\n", __FILE__, argv[1],
++	       		argv[2]);
++      			return TCL_ERROR;
++    		}
++    		
++		// Returns pointer to a trace target 
++    		if (strcasecmp (argv[1], "tracetarget") == 0)  {
++      			tracetarget = (Trace *) obj;
++      			return TCL_OK;
++    		}
++    		// Returns pointer to our node
++    		else if (strcasecmp (argv[1], "node") == 0) {
++      			node_ = (MobileNode*) obj;
++      			return TCL_OK;
++    		}
++    		// Returns pointer to port-demux
++    		else if (strcasecmp (argv[1], "port-dmux") == 0) {
++      			port_dmux_ = (NsObject *) obj;
++			return TCL_OK;
++    		}
++  	}  // if argc == 3
++  	return (Agent::command (argc, argv));
++}
++
++/* 5. Receiving Packets. */
++void 
++ZRPAgent::recv(Packet * p, Handler *h) {
++	hdr_ip *hdrip = HDR_IP(p);
++  	hdr_cmn *hdrc = HDR_CMN(p);
++  	hdr_zrp *hdrz = HDR_ZRP(p);
++  	int src = Address::instance().get_nodeaddr(hdrip->saddr());
++	
++	rx_++;		// just received a new packet
++	// [Case-1]: It's not a valid ZRP packet
++  	if (hdrc->ptype() != PT_ZRP) {
++		// [SubCase-1]: A packet from above Layer
++		if(src == myaddr_ && hdrc->num_forwards() == 0) {
++			hdrc->size() += IP_HDR_LEN;     // Add the IP Header size
++    			hdrip->ttl() = IERP_TTL;
++			route_pkt(p, hdrip->daddr());	// Route the Packet
++		// [SubCase-2]: receiving a pkt I sent, prob a routing loop
++		} else if (src == myaddr_) {
++			pktUtil_.pkt_drop(p);
++    			return;
++		// [SubCase-3]: forwarding a non-ZRP packet from another node
++  		} else {
++			printf("TEMPLOG--AT(%d) I DONOT KNOW WHAT TO DO WITH THIS PACKET--\n", myaddr_);
++			exit(0);
++    			if(--hdrip->ttl() == 0) {	// Check the TTL.  If it is zero, then discard.
++				pktUtil_.pkt_drop(p);
++      				return;
++    			}
++			// WHAT do I do with non-ZRP packets rcvd from another node?
++    			// just route_pkt it like any other? then this else clause is superfluous
++  		}
++	// [Case-2]: It's a valid ZRP packet
++	} else if (hdrc->ptype() == PT_ZRP) {
++	  	//[Check]: assert we're talking from network layer(rtagent) to network layer(rtagent)
++	  	assert(hdrip->sport() == RT_PORT); assert(hdrip->dport() == RT_PORT); assert(hdrc->ptype() == PT_ZRP);
++		switch(hdrz->zrptype_) {
++			case NDP_BEACON:
++				ndpAgt_.recv_NDP_BEACON(p);
++			break;
++			case NDP_BEACON_ACK:
++				ndpAgt_.recv_NDP_BEACON_ACK(p);
++			break;
++			case IARP_UPDATE:
++				iarpAgt_.recv_IARP_UPDATE(p);
++			break;	
++			case IARP_DATA:
++				iarpAgt_.recv_IARP_DATA(p);
++			break;
++			case IERP_REQUEST:
++				if(ierpAgt_.brpXmitPolicy_ == BRP_MULTICAST) {
++					//ierpAgt_.recv_IERP_ROUTE_REQUEST_MC(p);
++				} else {
++					ierpAgt_.recv_IERP_ROUTE_REQUEST_UNI(p);
++				}
++			break;
++			case IERP_REPLY:
++				ierpAgt_.recv_IERP_ROUTE_REPLY(p);
++			break;
++			case IERP_ROUTE_ERROR:
++				ierpAgt_.recv_IERP_ROUTE_ERROR(p);
++			break;
++			case IERP_DATA:
++				ierpAgt_.recv_IERP_DATA(p);
++			break;
++    			default:
++      				// error, unknown zrptype, drop 
++      				fprintf(stderr, "Invalid ZRP type (%x)\n", hdrz->zrptype_);
++      				exit(1);
++		}
++	}	
++}
++
++/* 6. Route the Packet. */
++void 
++ZRPAgent::route_pkt(Packet* p, nsaddr_t dest) {
++  	hdr_cmn *hdrc = HDR_CMN(p);
++  	hdr_ip *hdrip = HDR_IP(p);
++  	hdr_zrp *hdrz = HDR_ZRP(p);
++	
++	// [Task-1]: Check if IARP route is Available OR not...
++	InnerRoute *handleToInnerRoute = NULL;
++	int foundInnerRoute;
++	foundInnerRoute = iarpAgt_.irLst_.findRoute(dest, &handleToInnerRoute);
++	if(foundInnerRoute == TRUE) {				// IARP route is Available 
++		sendPacketUsingIARPRoute(p, dest, 0.00);
++		return;
++	}
++
++	// [Task-2]: Both IARP & IERP routes are not available.
++	Time now = Scheduler::instance().clock(); // get the time
++	SentQuery *handleToFoundQuery = NULL;
++	int foundQueryFlag;
++	// [SubTask-1]: Initiate Route-Discovery if needed.
++	foundQueryFlag = ierpAgt_.sqLst_.findQuery(myaddr_, dest, &handleToFoundQuery);
++	if(foundQueryFlag == FALSE) { // If No query is generated before
++		Packet *pnew;
++		pnew = pktUtil_.pkt_create(IERP_REQUEST, dest, IERP_TTL);
++		hdr_zrp *hdrznew = HDR_ZRP(pnew);
++		hdrznew->queryID_ = queryID_;	queryID_++;	if(queryID_ == 1000000) {queryID_ = 0;}
++		hdrznew->routelength_ = 0;	// No route till now
++		hdrznew->routeindex_ = 0;	// Route_Index points to the sender(or forwarder) of a query
++		hdrznew->src_ = myaddr_;	
++		hdrznew->dest_ = dest;		// dest address
++		hdrznew->lastbc_ = myaddr_;	// Miss-leading but consistent with 'recv_IERP_ROUTE_REQUEST_XX' call
++		// [SubTask-2]: Add this query to Sent-Query-Cache..
++		ierpAgt_.sqLst_.addQuery(myaddr_, dest, now+ierpAgt_.queryRetryTime_);
++		// [SubTask-3]: Bordercast this query
++		if(ierpAgt_.brpXmitPolicy_ == BRP_MULTICAST) {	// This will add entry into cache
++			//ierpAgt_.recv_IERP_ROUTE_REQUEST_MC(pnew);	// And Send the ROUTE_REQUEST
++		} else {
++			ierpAgt_.recv_IERP_ROUTE_REQUEST_UNI(pnew);
++		}
++	}
++	// [SubTask-2]: Insert Packet into the Send Buffer.
++	if(sendBuf_.numPackets_ <= DEFAULT_SEND_BUFFER_SIZE) {	// Checking Buffer Overflow [Drop-Tail]
++		Time now = Scheduler::instance().clock(); // get the time
++		sendBuf_.addPacket(p, dest, now+DEFAULT_PACKET_LIFETIME);
++	} else {	
++					if(DEBUG) { // [Log: XMIT_CBR_DATA]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | XMIT_CBR_DATA | -S %d -D %d | NO_ROUTE_and_SEND_BUF_DROP | ",
++					myaddr_, now, hdrip->saddr(), hdrip->daddr());
++					print_tables(); printf("\n"); 
++					} // [Log: End]
++					if(DEBUG) { // [Log: DROP_CBR_DATA]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | DROP_CBR_DATA | -S %d -D %d | NO_ROUTE_and_SEND_BUF_DROP | ",
++					myaddr_, now, hdrip->saddr(), hdrip->daddr());
++					print_tables(); printf("\n"); 
++					} // [Log: End]
++		drop(p, DROP_RTR_QFULL);// drops the packet
++		//assert(p != NULL);
++		//Packet::free(p); 	// Not needed anymore
++	}
++}
++
++/* 7. Send Packets from the Send_Buffer.*/
++void 
++ZRPAgent::route_SendBuffer_pkt() {
++	// 1. Scan the SendBuffer and send packets for which routes are available.
++	if(sendBuf_.numPackets_ != 0) {
++		SendBufferEntry *prev, *cur, *toBeDeleted;
++		InnerRoute *handleToInnerRoute = NULL;
++		int foundInnerRoute;
++		// Case-1: Non-head_ case
++		prev = sendBuf_.head_; cur = sendBuf_.head_->next_;
++		for(int i=0; cur!=NULL; i++) {
++			handleToInnerRoute = NULL; foundInnerRoute = FALSE;
++			foundInnerRoute = iarpAgt_.irLst_.findRoute(cur->dest_, &handleToInnerRoute);
++			if(foundInnerRoute == TRUE) {	// IARP route is Available 
++				Time jitter;
++				jitter =  Random::uniform(DEFAULT_INTERPKT_JITTER);
++				sendPacketUsingIARPRoute(cur->pkt_, cur->dest_, jitter);
++				toBeDeleted = cur;
++				prev->next_ = cur->next_;
++				cur = cur->next_;
++				delete toBeDeleted;
++				sendBuf_.numPackets_--;
++			} else {
++				prev = cur;
++				cur = cur->next_;
++			}
++		}
++		// Case-2: head_ case
++		foundInnerRoute = iarpAgt_.irLst_.findRoute((sendBuf_.head_)->dest_, &handleToInnerRoute);
++		if(foundInnerRoute == TRUE) {	// IARP route is Available 
++			Time jitter;
++			jitter =  Random::uniform(DEFAULT_INTERPKT_JITTER);
++			sendPacketUsingIARPRoute((sendBuf_.head_)->pkt_, (sendBuf_.head_)->dest_, jitter);
++			toBeDeleted = sendBuf_.head_;
++			sendBuf_.head_ = sendBuf_.head_->next_;
++			delete toBeDeleted;
++			sendBuf_.numPackets_--;
++		}
++	}
++}
++
++/* 8. Send Packet Using IARP route. */
++void 
++ZRPAgent::sendPacketUsingIARPRoute(Packet *p, nsaddr_t dest, Time delay) {
++  	hdr_cmn *hdrc = HDR_CMN(p);
++  	hdr_ip *hdrip = HDR_IP(p);
++  	hdr_zrp *hdrz = HDR_ZRP(p);
++
++	// [SubTask-1]: Save upper layer info in encapsulated area
++	hdrz->enc_daddr_ = hdrip->daddr();
++	hdrz->enc_dport_ = hdrip->dport();
++	hdrz->enc_ptype_ =  hdrc->ptype();
++	// [SubTask-2]: Add the Route
++	iarpAgt_.addRouteInPacket(dest, p);
++	hdrz->routeindex_ = 0;				// Pointing to My address
++	// [SubTask-3]: Change Packet Parameters
++	hdrc->direction() = hdr_cmn::DOWN; 		// Common Header
++	hdrc->ptype() = PT_ZRP;				// 	''
++	hdrc->next_hop() = hdrz->route_[1];		// 	''	[Next Hop]
++	hdrc->addr_type_ = NS_AF_NONE;			// 	''
++	hdrip->ttl() = hdrz->routelength_;		// IP Header
++	hdrip->saddr() = myaddr_;	 		// 	''
++	hdrip->daddr() = hdrz->route_[1]; 		// 	''	[Next Hop]
++	hdrip->sport() = ROUTER_PORT;	 		// 	''
++	hdrip->dport() = ROUTER_PORT;			// 	''
++	if(hdrz->routelength_ <= radius_) {
++		hdrz->zrptype_ = IARP_DATA;			// ZRP Header
++	} else {
++		hdrz->zrptype_ = IERP_DATA;			// ZRP Header
++	}
++	hdrz->src_ = myaddr_;				//	''
++	hdrz->dest_ = dest;				//	''
++	hdrz->pktsent_ = Scheduler::instance().clock(); //	''
++	hdrz->seq_ = pktUtil_.seq_;			//	''
++	pktUtil_.inc_seq();
++	// [SubTask-4]: Send the Packet
++	pktUtil_.pkt_send(p, hdrip->daddr(), 0.00);
++					if(DEBUG && hdrz->zrptype_ == IARP_DATA) { // [Log: XMIT_IARP_DATA]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | XMIT_CBR_DATA | -S %d -D %d | -SEQ %d -Type IARP | ",
++					myaddr_, now, hdrz->src_, hdrz->dest_, hdrz->seq_);
++					pktUtil_.pkt_print_route(p); print_tables(); printf("\n"); 
++					} // [Log: End]
++					if(DEBUG && hdrz->zrptype_ == IARP_DATA) { // [Log: XMIT_IARP_DATA]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | XMIT_IARP_DATA | -S %d -D %d | -IS %d -ID %d | -SEQ %d | ",
++					myaddr_, now, hdrz->src_, hdrz->dest_, hdrip->saddr(), hdrip->daddr(), hdrz->seq_);	
++					pktUtil_.pkt_print_route(p); print_tables(); printf("\n"); 
++					} // [Log: End]
++					if(DEBUG && hdrz->zrptype_ == IERP_DATA) { // [Log: XMIT_IARP_DATA]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | XMIT_CBR_DATA | -S %d -D %d | -SEQ %d -Type IERP | ",
++					myaddr_, now, hdrz->src_, hdrz->dest_, hdrz->seq_);
++					pktUtil_.pkt_print_route(p); print_tables(); printf("\n"); 
++					} // [Log: End]
++					if(DEBUG && hdrz->zrptype_ == IERP_DATA) { // [Log: XMIT_IERP_DATA]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | XMIT_IERP_DATA | -S %d -D %d | -IS %d -ID %d | -SEQ %d | ",
++					myaddr_, now, hdrz->src_, hdrz->dest_, hdrip->saddr(), hdrip->daddr(), hdrz->seq_);	
++					pktUtil_.pkt_print_route(p); print_tables(); printf("\n"); 
++					} // [Log: End]
++
++}
++
++
++/* 9. Printing Tables. */
++void 
++ZRPAgent::print_tables() {
++	ndpAgt_.print_tables();
++	iarpAgt_.print_tables();
++	ierpAgt_.print_tables();
++}
++
++/* 10. As a part of Route-Maintainance for IERP. */
++void 
++ZRPAgent::mac_failed(Packet *p) {
++	hdr_ip *hdrip = HDR_IP(p);
++	hdr_cmn *hdrc = HDR_CMN(p);
++	hdr_zrp *hdrz = HDR_ZRP(p);
++	int nexthop;
++
++	switch (hdrz->zrptype_) {
++		case IERP_DATA:
++					if(DEBUG) { // [Log: DROP_CBR_DATA]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | DROP_CBR_DATA | -S %d -D %d | MAC_FAILED -SEQ %d -Type IERP | ",
++					myaddr_, now, hdrz->src_, hdrz->dest_, hdrz->seq_);
++					print_tables(); printf("\n"); 
++					} // [Log: End]	
++			nexthop = hdrz->route_[hdrz->routeindex_+1];	// This pkt was unable to reach this NEXT HOP...
++			// Use the same packet and Xmit back it towards Sender
++			hdrz->zrptype_ = IERP_ROUTE_ERROR;
++			pktUtil_.pkt_add_LSU_space(p, 1); 	// Add the broken [ONLY one]link info...
++		  	hdrz->links_[0].src_ = myaddr_;		// Currently this Info is not being used...	
++  			hdrz->links_[0].dest_ = nexthop;	// But may be worth sending.. so can be used...	
++		  	hdrz->links_[0].isUp_ = FALSE;
++
++			// [Case-1]: Failed at source...
++			if(hdrz->src_ == myaddr_) {	
++				ierpAgt_.recv_IERP_ROUTE_ERROR(p);
++				return;
++			}
++
++			// [Case-2]: Failes along the route...
++			assert(hdrz->routeindex_-1 >= 0);
++			hdrc->direction() = hdr_cmn::DOWN;
++			hdrip->saddr() = myaddr_;
++			hdrip->daddr() = hdrz->route_[hdrz->routeindex_-1];
++			pktUtil_.pkt_send(p, hdrip->daddr(), 0.00);
++					if(DEBUG) { // [Log: XMIT_IERP_ERROR]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | XMIT_IERP_ERROR | -S %d -D %d | -IS %d -ID %d | -SEQ %d | ",
++					myaddr_, now, hdrz->src_, hdrz->dest_, hdrip->saddr(), hdrip->daddr(), hdrz->seq_);
++					pktUtil_.pkt_print_route(p); print_tables(); printf("\n");
++					} // [Log: End]
++
++			if(IERP_ERROR_SNOOP) {
++				// Remove the broken link info from topology table
++				ierpAgt_.removeLinkStateFromBrokenRoute(myaddr_, nexthop);
++			}
++		break;
++
++		case IARP_DATA:
++			// Currently, just logging the event, Not taking any action for this event.
++					if(DEBUG) { // [Log: DROP_CBR_DATA]
++					Time now = Scheduler::instance().clock(); // get the time
++					printf("\n_%d_ [%6.6f] | DROP_CBR_DATA | -S %d -D %d | -SEQ %d MAC_FAILED -Type IARP | ",
++					myaddr_, now, hdrz->src_, hdrz->dest_, hdrz->seq_);
++					print_tables(); printf("\n"); 
++					} // [Log: End]	
++		break;
++
++		default:
++		break;
++	}
++}
+diff -Naur ns-2.35-orig/zrp/zrp.h ns-2.35/zrp/zrp.h
+--- ns-2.35-orig/zrp/zrp.h	1970-01-01 01:00:00.000000000 +0100
++++ ns-2.35/zrp/zrp.h	2014-11-23 15:31:19.318040422 +0100
+@@ -0,0 +1,927 @@
++#ifndef _zrp_h_
++#define _zrp_h_
++
++/* [SECTION-1]------------------------------------------------------------------
++ * INIT SECTION:- HEADERS AND PRE-PROCESSOR MACROS.
++ * -----------------------------------------------------------------------------
++ */
++
++#include <config.h>
++#include <assert.h>
++#include <agent.h>
++#include <packet.h>
++#include <ip.h>
++#include <delay.h>
++#include <scheduler.h>
++#include <queue.h>
++#include <trace.h>
++#include <arp.h>
++#include <ll.h>
++#include <mac.h>
++#include <priqueue.h>
++#include <delay.h>
++
++#include <random.h>
++#include <object.h>
++#include <route.h>
++#include <cmu-trace.h>
++
++#include "constants.h"
++
++#if defined(WIN32) && !defined(snprintf)
++#define snprintf _snprintf
++#endif /* WIN32 && !snprintf */
++
++#if !defined(NULL)	/* Defining NULL = 0 */
++#define NULL 0
++#endif
++
++
++
++
++/* [SECTION-2]------------------------------------------------------------------
++ * NDP (NEIGHBOR DISCOVERY PROTOCOL):- SUBSECTIONS CONTAINS FOLLOWING THINGS:
++ *	1) NEIGHBOR-LIST 		(Neighbor Table)
++ *	2) BEACON-TRANSMIT TIMER	(Periodic Beacon Xmission)
++ *	3) ACK-TIMEOUT TIMER		(ACK-Timeout Checking)
++ *	4) NDP AGENT			(Neighbor Discovery Agent)
++ * -----------------------------------------------------------------------------
++ * [SUB-SECTION-2.1]------------------------------------------------------------
++ * NEIGHBOR-LIST:- NEIGHBOR TABLE AND ASSOCIATED FUNCTIONS
++ * -----------------------------------------------------------------------------
++ */
++/*!	\class Neighbor
++	\brief This class contains NEIGHBOR NODE information.
++ */
++class Neighbor
++{
++  public:		
++	nsaddr_t addr_;		// 32 bit Address
++  	Time lastack_;		// Last ACK received Time
++	int linkStatus_;	// Link-Status with this Neighbor
++	int AckTOCount_;	// No-of-times ACK-TO has occured with this Nb
++	Neighbor *next_;	// Pointer to Next Element
++
++	// Constructors...
++	Neighbor() : addr_(-1), lastack_(-1), linkStatus_(LINKDOWN),
++		next_(NULL) {}	// Initialize with Invalid Entries
++	Neighbor(nsaddr_t addr, Time lastack, int linkStatus) : addr_(addr),
++		lastack_(lastack), linkStatus_(linkStatus), AckTOCount_(0),
++		next_(NULL) {} 
++};
++
++/*!	\class NeighborList
++	\brief This class is the linked-list of Neighbor class.
++ */
++class NeighborList
++{
++  public:
++	Neighbor *head_;	// Pointer to head
++	int numNeighbors_;	// Number of Neighbors
++
++	// Constructors...
++	NeighborList() : head_(NULL), numNeighbors_(0) {}
++
++	// Methods...
++	void addNeighbor(nsaddr_t addr, Time lastack, int linkStatus);
++	int findNeighbor(nsaddr_t addr, Neighbor **handle);
++	int isEmpty();
++	void removeNeighbor(Neighbor *prev, Neighbor *toBeDeleted);
++	void purgeDownNeighbors();
++	void freeList();
++	void printNeighbors();	
++};
++
++class ZRPAgent;		// Pre-Declaration... [Needed for Timers]
++/* [SUB-SECTION-2.2]------------------------------------------------------------
++ * BEACON-TRANSMIT TIMER:- PERIODIC BEACON XMISSION
++ * -----------------------------------------------------------------------------
++ */
++/*!	\class NDPBeaconTransmitTimer
++	\brief This class implements a BEACON Transmit Timer, who periodically sends beacons to NEIGHBOR nodes.
++ */
++class NDPBeaconTransmitTimer : public Handler 
++{
++  public:
++	// Data...
++	ZRPAgent *agent_;		// Pointer to ZRP-Agent
++	Event intr_;		
++	int beacon_period_; 		// Inter-Beacon-Time
++	int beacon_period_jitter_;	// Jitter added to Inter-Beacon-Time
++	int neighbor_ack_timeout_; 	// Only for Logging
++
++	// Constructor...
++	NDPBeaconTransmitTimer(ZRPAgent* agent) : agent_(agent),
++		beacon_period_(DEFAULT_BEACON_PERIOD), 
++		beacon_period_jitter_(DEFAULT_BEACON_PERIOD_JITTER),
++		neighbor_ack_timeout_(DEFAULT_NEIGHBOR_ACK_TIMEOUT) {}
++
++	void handle(Event*);  		// function handling the event
++	void start(double thistime);
++};
++
++/* [SUB-SECTION-2.3]------------------------------------------------------------
++ * ACK-TIMEOUT TIMER:- ACK-TIMEOUT CHECKING
++ * -----------------------------------------------------------------------------
++ */
++/*!	\class NDPAckTimer
++	\brief This class implements a Acknoledgement TimeOut Timer, who checks
++	       that ACK is received or not for sent beacon.
++ */
++class NDPAckTimer : public Handler 
++{
++  public:
++	ZRPAgent *agent_;		// Pointer to ZRP-Agent
++	Event intr_;
++	int neighbor_ack_timeout_;	// Time before a neighbor must send ACK	
++
++	// Constructor...
++	NDPAckTimer(ZRPAgent* agent) : agent_(agent),
++		neighbor_ack_timeout_(DEFAULT_NEIGHBOR_ACK_TIMEOUT) {}
++
++  	void handle(Event*);  		// function handling the event
++	void start();
++};
++
++/* [SUB-SECTION-2.4]------------------------------------------------------------
++ * NDP AGENT:- NEIGHBOR DISCOVERY AGENT
++ * -----------------------------------------------------------------------------
++ */
++/*!	\class NDPAgent
++	\brief This class implements the Neighbor Discovery Protocol (NDP).
++ */
++class NDPAgent
++{
++  public:
++	// Data...
++	ZRPAgent *agent_;		// Pointer to ZRP-Agent
++	NeighborList neighborLst_;	// Neighbor List
++	NDPBeaconTransmitTimer BeaconTransmitTimer_;	// Beacon-Xmit-Timer
++	NDPAckTimer AckTimer_;				// ACK-TO-Timer
++	int startup_jitter_;		// For starting the Timers
++
++	// Constructors...
++	/*!	\fn NDPAgent(ZRPAgent *)
++
++		This constructor is called by the constructor of ZRP. It initializes 
++		different compenents in NDP.
++	 */
++	NDPAgent(ZRPAgent *agent) : agent_(agent), BeaconTransmitTimer_(agent),
++		AckTimer_(agent), startup_jitter_(DEFAULT_STARTUP_JITTER) {}
++	
++	// Methods...
++	/*!	\fn void startUp()
++		
++		This is called by ZRPAgent::startUp() method. It does following tasks: \n
++		- Starts the Beacon-Transmit-Timer. \n
++		- Clears the Neighbor-List.
++	*/
++	void startUp();
++	/*!	\fn void recv_NDP_BEACON(Packet* p)
++		
++		This function is called whenever ZRP receives an NDP_BEACON packet. On receving 
++		'NDP_BEACON', node sends 'NDP_BEACON_ACK' to the sender. But it does not add this 
++		neighbor, because node stores only symmetric links.
++	*/
++	void recv_NDP_BEACON(Packet* p);
++	/*!	\fn void recv_NDP_BEACON_ACK(Packet* p)
++		
++		This function is called whenever ZRP receives an NDP_BEACON_ACK packet. \n
++		- If it's a new neighbor, node adds the neighbor to its 'NEIGHBOR_TABLE' and 
++		notifies IARP to rebuild the 'INNER_ROUTING_TABLE' and 'PERIPHERAL_NODE_TABLE'. \n
++		- If it's an existing neighbor, it updates 'LAST_ACK_TIME' for that neighbor.
++	*/
++	void recv_NDP_BEACON_ACK(Packet* p);
++	/*!	\fn void print_tables()
++		
++		This function prints the Neighbor-List. It also prints which Neighbors are UP 
++		and which are DOWN.
++	*/
++	void print_tables();
++};
++
++
++
++
++
++/* [SECTION-3]------------------------------------------------------------------
++ * IARP (INTRA-ZONE ROUTING PROTOCOL):- SUBSECTIONS CONTAINS FOLLOWING THINGS:
++ *	1) LINKSTATE LIST 		(Topology Table)
++ *	2) PERIPHERAL-NODE LIST		(Peripheral-Node Table)
++ *	3) INNER-ROUTE LIST		(Inner-Route Table)
++ *	4) UPDATE-DETECT LIST		(Update-detect Cache)
++ *	5) PERIODIC-UPDATE TIMER	(Periodic Update Xmission)
++ *	6) EXPIRATION-CHECK TIMER	(For Expiration of LinkState and Routes)
++ *	7) IARP AGENT			(IntrA-Zone Routing Agent)
++ * -----------------------------------------------------------------------------
++ * [SUB-SECTION-3.1]------------------------------------------------------------
++ * LINKSTATE LIST:- TOPOLOGY TABLE
++ * -----------------------------------------------------------------------------
++ */
++class LinkState
++{
++  public:
++	// Data...
++  	nsaddr_t src_;  	// 32 bits
++  	nsaddr_t dest_;  	// 32 bits
++  	int seq_;  		// sequence number
++  	int isup_;		// Link State LINKUP[1]/LINKDOWN[0]
++  	Time expiry_;		// Link Expiry Time
++	LinkState *next_;	// Pointer to Next Element
++
++	// Constructors...
++	LinkState() : src_(-1), dest_(-1), seq_(-1),
++		isup_(-1), expiry_(-1.0), next_(NULL) {}
++	LinkState(nsaddr_t src, nsaddr_t dest, int seq, int isup, Time expiry) {
++		src_ = src;
++	  	dest_ = dest;
++  		seq_ = seq;
++  		isup_ = isup;
++  		expiry_ = expiry;
++		next_ = NULL;
++	}
++};
++class LinkStateList
++{
++  public:
++	// Data...
++	LinkState *head_;
++	int numLinks_;
++
++	// Constructors...
++	LinkStateList() : head_(NULL), numLinks_(0) {}
++	
++	// Methods...
++	void addLink(nsaddr_t src, nsaddr_t dest, int seq, int isup, Time expiry);
++	int findLink(nsaddr_t src, nsaddr_t dest, LinkState **handle);
++	int isEmpty();
++	void removeLink(LinkState *prev, LinkState *toBeDeleted);
++	int purgeLinks();
++	void printLinks();
++	void freeList();
++};
++
++/* [SUB-SECTION-3.2]------------------------------------------------------------
++ * PERIPHERAL-NODE LIST:- PERIPHERAL-NODE TABLE
++ * -----------------------------------------------------------------------------
++ */
++class PeripheralNode
++{
++  public:
++	// Data...
++	nsaddr_t addr_;		// Address of the Node
++	int coveredFlag_;	// Only For IERP
++	PeripheralNode *next_;	// Pointer to the next element
++
++	// Constructor...	
++	PeripheralNode() : addr_(-1), coveredFlag_(FALSE), next_(NULL) {}
++	PeripheralNode(nsaddr_t addr, int coveredFlag) : addr_(addr),
++		coveredFlag_(coveredFlag), next_(NULL) {}
++};
++class PeripheralNodeList
++{
++  public:
++	// Data...
++	PeripheralNode *head_;
++	int numPerNodes_;
++
++	// Constructor...	
++	PeripheralNodeList() : head_(NULL), numPerNodes_(0) {}
++
++	// Methods...
++	void addPerNode(nsaddr_t addr, int coveredFlag);
++	int findPerNode(nsaddr_t addr);
++	void copyList(PeripheralNodeList *newList);
++	void freeList();
++};
++
++/* [SUB-SECTION-3.3]------------------------------------------------------------
++ * INNER-ROUTE LIST:- INNER-ROUTE TABLE
++ * -----------------------------------------------------------------------------
++ */
++class InnerRoute
++{
++  public:
++	// Data...
++	nsaddr_t addr_;		// Destination Address
++	nsaddr_t nextHop_;	// Next hop to reach that destination
++	int numHops_;		// # of hops to the Destination
++	InnerRoute *next_;	// Next entry in the Routelist
++	InnerRoute *predecessor_; // To construct bordercast tree
++	
++	// Constructors...
++	InnerRoute() : addr_(-1), nextHop_(-1), numHops_(-1), next_(NULL),
++		predecessor_(NULL) {}
++	InnerRoute(nsaddr_t addr, nsaddr_t nextHop, InnerRoute *predecessor, int numHops) {
++		addr_ = addr;
++		nextHop_ = nextHop;
++		predecessor_ = predecessor;
++		numHops_ = numHops;
++		next_ = NULL;
++	}
++};
++class InnerRouteList
++{
++  private:	
++	InnerRoute *tail_;	// Used in addRoute()... 
++  public:	
++	// Data...
++	InnerRoute *head_;
++	int numRoutes_;
++	
++	// Constructor...
++	InnerRouteList() : tail_(NULL), head_(NULL), numRoutes_(0) {}
++	
++	// Methods...
++	void addRoute(nsaddr_t addr, nsaddr_t nextHop, InnerRoute *predecessor,
++		int numHops);
++	int findRoute(nsaddr_t addr, InnerRoute **handle);
++	void freeList();
++};
++
++/* [SUB-SECTION-3.4]------------------------------------------------------------
++ * UPDATE-DETECT LIST:- UPDATE-DETECT CACHE
++ * -----------------------------------------------------------------------------
++ */
++class IARPUpdate
++{
++  public:
++	// Data...
++	nsaddr_t updateSrc_;	// Address of the sender
++	int seq_;		// Sequence Number
++  	Time expiry_;		// Expiry Time	
++	IARPUpdate *next_;	// Pointer to the Next Element
++
++	// Constructor...
++	IARPUpdate() : 	updateSrc_(-1), seq_(-1), expiry_(-1), next_(NULL) {}
++	IARPUpdate(nsaddr_t updateSrc, int seq, Time expiry) {
++		updateSrc_ = updateSrc;
++		seq_ = seq;
++		expiry_ = expiry;
++		next_ = NULL;
++	}
++};
++class IARPUpdateDetectedList
++{
++  public:
++	// Data...
++	IARPUpdate *head_;
++	int numUpdates_;
++	
++	// Constructor...
++	IARPUpdateDetectedList() : head_(NULL), numUpdates_(0) {}
++	
++	// Methods...
++	void addUpdate(nsaddr_t updateSrc, int seq, Time expiry);
++	int findUpdate(nsaddr_t updateSrc, int seq);
++	void purgeExpiredUpdates();
++	void freeList();
++};
++
++/* [SUB-SECTION-3.5]------------------------------------------------------------
++ * PERIODIC-UPDATE TIMER:- PERIODIC UPDATE XMISSION
++ * -----------------------------------------------------------------------------
++ */
++class IARPPeriodicUpdateTimer : public Handler
++{
++ public:
++	// Data...
++	ZRPAgent *agent_;		// Pointer to ZRP-Agent
++	Event intr_;	
++	int min_iarp_update_period_;	// Min-Update Interval
++	int max_iarp_update_period_;	// Max-Update Interval
++	Time lastUpdateSent_;		// Last-Update Sent Time
++
++	// Constructor...
++	IARPPeriodicUpdateTimer(ZRPAgent* agent) : agent_(agent),
++		min_iarp_update_period_(DEFAULT_MIN_IARP_UPDATE_PERIOD),
++		max_iarp_update_period_(DEFAULT_MAX_IARP_UPDATE_PERIOD),
++		lastUpdateSent_(0.0) {}
++	
++	// Methods...
++  	void handle(Event*);  		// function handling the event
++  	void start(double thistime);
++};
++
++/* [SUB-SECTION-3.6]------------------------------------------------------------
++ * EXPIRATION-CHECK TIMER:- FOR EXPIRATION OF LINKSTATE AND ROUTES
++ * -----------------------------------------------------------------------------
++ */
++class IARPExpirationTimer : public Handler
++{
++  public:	
++	// Data...
++	ZRPAgent *agent_;		// Pointer to ZRP-Agent
++	Event intr_;
++	int expiration_check_period_;	// Expiration-Check-Interval
++	
++	// Constructor...
++	IARPExpirationTimer(ZRPAgent* agent) : agent_(agent),
++		expiration_check_period_(DEFAULT_EXPIRATION_CHECK_PERIOD) {}
++
++	// Methods...
++  	void handle(Event*);  		// function handling the event
++  	void start(double thistime);
++};
++
++/* [SUB-SECTION-3.7]------------------------------------------------------------
++ * IARP AGENT:- INTRA-ZONE ROUTING AGENT
++ * -----------------------------------------------------------------------------
++ */
++/*!	\class IARPAgent
++	\brief This class implements the IntrAzone Routing Protocol (IARP).
++ */
++class IARPAgent
++{
++  public:
++	// Data...
++	ZRPAgent *agent_;	// Pointer to ZRP-Agent
++	int updateSendFlag_;	// Intialized with TRUE [periodic update is sent
++				// if this flag is TRUE; After sending each update,
++				// this flag is set FALSE]
++	// Lists...
++	LinkStateList lsLst_;	// Topology Table
++	PeripheralNodeList pnLst_;	// Peripheral-Node Table
++	InnerRouteList irLst_;	// Proactive-Routing Table
++	IARPUpdateDetectedList upLst_;	// Detected-Update Cache
++	int linkLifeTime_;	// DEFAULT_LINK_LIFETIME
++	int updateLifeTime_;	// DEFAULT_UPDATE_LIFETIME
++
++	// Timers...
++  	IARPPeriodicUpdateTimer PeriodicUpdateTimer_;
++	IARPExpirationTimer ExpirationTimer_; 
++	int startup_jitter_;	// For starting the Timers
++	
++	// Constructors...
++	/*!	\fn IARPAgent(ZRPAgent *)
++
++		This constructor is called by the constructor of ZRP. It initializes 
++		different compenents in IARP.
++	 */
++	IARPAgent(ZRPAgent *agent) : agent_(agent), updateSendFlag_(TRUE),
++		linkLifeTime_(DEFAULT_LINK_LIFETIME),
++		updateLifeTime_(DEFAULT_UPDATE_LIFETIME), 
++		PeriodicUpdateTimer_(agent), ExpirationTimer_(agent),
++		startup_jitter_(DEFAULT_STARTUP_JITTER) {}
++
++	// Methods...
++	/*!	\fn void startUp()
++		
++		This is called by ZRPAgent::startUp() method. It does following tasks: \n
++		- Starts the Periodic-Update-Timer & Expiration-Timer. \n
++		- Clears the LinkState-List, PeripheralNode-List, Inner-Route-List & 
++		Detected-Update-List.
++	*/
++	void startUp();		 // Starting Timers & Clearing Lists(Tables)
++	/*!	\fn void buildRoutingTable()
++		
++		This function creates Inner-Route-List & Peripheral-Node-List based on 
++		Link-State-List. The following steps are performed.\n
++		-# Clear the existing Inner-Route-List & Peirpheral-Node-List.
++		-# Purge the expired links & DOWN links.
++		-# Generate a BFS tree from existing Link-State list.
++		-# Generate Inner-Routing-List based on that BFS tree. Insert all leaf 
++		   nodes in Peripheral-Node-List.
++	*/
++	void buildRoutingTable();// Create Routing-Table based on Topology-Table
++	/*!	\fn void addRouteInPacket(nsaddr_t dest, Packet *p)
++		
++		This function adds the Inner-route for node 'dest' in packet 'p' if available.
++	*/
++	void addRouteInPacket(nsaddr_t dest, Packet *p);
++	/*!	\fn void recv_IARP_UPDATE(Packet* p)
++		
++		This function is called whenever ZRP receives an IARP_UPDATE packet. On 
++		receiving IARP_UPDATE, following tasks are performed -
++		- If it's a new iarp_update then,
++			- node updates its 'LINK_STATE_TABLE',
++			- If 'LINK_STATE_TABLE' is changed then, it rebuilds the 
++			'INNER_ROUTING_TABLE' and 'PERIPHERAL_NODE_TABLE',
++			- caches this update in 'UPDATE_DETECT_TABLE' for control flooding,
++			- re-broadcasts it if TTL is not equal to zero.
++		- If it's an already received iarp_update then, 
++			- node discards this update.
++	*/
++	void recv_IARP_UPDATE(Packet* p); // Receiving IARP Updates
++	/*!	\fn void recv_IARP_DATA(Packet* p)
++		
++		This function is called whenever ZRP receives an IARP_DATA packet. On 
++		receiving IARP_DATA, following tasks are performed -
++		- If it's destination matches with this node,
++			- send it to upper layer.
++		- Else
++			- forward it to along the route contained in the packet.
++	*/
++	void recv_IARP_DATA(Packet* p);	// Receiving IARP DATA(Local Traffic)
++	/*!	\fn void print_tables()
++		
++		This function prints Peripheral-Node-List & Inner-Route-List.
++	*/
++	void print_tables();		// Print all Tables
++};
++
++
++
++
++
++/* [SECTION-4]------------------------------------------------------------------
++ * IERP (INTER-ZONE ROUTING PROTOCOL):- SUBSECTIONS CONTAINS FOLLOWING THINGS:
++ *	1) DETECTED IERP-REQUEST	(Detected Queries Cache)
++ *	2) SENT IERP-REQUEST		(Sent Queries Cache)
++ *	3) OUTERROUTE LIST		(Route Table)
++ *	4) EXPIRATION-CHECK TIMER	(For Expiration of IERP-Requests)
++ *	5) IERP AGENT			(Inter-Zone Routing Agent)
++ * -----------------------------------------------------------------------------
++ * [SUB-SECTION-4.1]------------------------------------------------------------
++ * DETECTED IERP-REQUEST:- DETECTED QUERIES CACHE
++ * -----------------------------------------------------------------------------
++ */
++class DetectedQuery
++{
++  public:
++	// Data...
++	nsaddr_t src_;		// 32 bits
++	nsaddr_t dest_;		// 32 bits
++	int queryID_;		// Query ID
++	Time expiry_;		// Expiry of this detected Entry
++	PeripheralNodeList pnLst_;	// Query-Coverage Info
++	int querySentFlag_;	// Whether the query is Sent/Forwarded or Not
++	int totalReplySent_;
++	DetectedQuery *next_; 	// Pointer to Next Element
++
++	// Constructors...
++	DetectedQuery() : src_(-1), dest_(-1), queryID_(-1), expiry_(-1.0),
++		querySentFlag_(0), totalReplySent_(0), next_(NULL) {}
++	DetectedQuery(nsaddr_t src, nsaddr_t dest, int queryID, Time expiry,
++		PeripheralNodeList *curPNLst) {
++	  	src_ = src;
++		dest_ = dest;
++		queryID_ = queryID;
++		expiry_ = expiry;
++		querySentFlag_ = FALSE;
++		next_ = NULL;
++		totalReplySent_ = 0; 
++		// Add peripheral node list...
++		if(curPNLst == NULL) {	// UNICAST CASE
++			// Do Nothing [We wont use coverage info]...
++		} else {		// MULTICAST CASE
++			// Copies the peripheral-node-list to 'pnLst'
++			curPNLst->copyList(&pnLst_);
++		}
++	}
++};
++
++class DetectedQueryList
++{
++  public:
++	// Data...
++	DetectedQuery *head_;
++	int numQueries_;
++
++	// Constructors...
++	DetectedQueryList() : head_(NULL), numQueries_(0) {}
++	
++	// Methods...
++	void addQuery(nsaddr_t src, nsaddr_t dest, int queryID, Time expiry,
++		PeripheralNodeList *curPNLst);
++	int findQuery(nsaddr_t src, nsaddr_t dest, int queryID, DetectedQuery
++		**handle);	// Returns TRUE or FALSE.
++	void removeQuery(nsaddr_t src, nsaddr_t dest, int queryID);
++	void purgeExpiredQueries();
++	void freeList();
++};
++
++/* [SUB-SECTION-4.2]------------------------------------------------------------
++ * SENT IERP-REQUEST:- SENT QUERIES CACHE
++ * -----------------------------------------------------------------------------
++ */
++class SentQuery
++{
++  public:
++	// Data...
++  	nsaddr_t src_;  	// 32 bits
++	nsaddr_t dest_;  	// 32 bits
++	Time expiry_;		// Expiry of this detected Entry
++	SentQuery *next_;	// Pointer to Next Element
++
++	// Constructors...	
++	SentQuery() : src_(-1), dest_(-1), expiry_(-1.0), next_(NULL) {}
++	SentQuery(nsaddr_t src, nsaddr_t dest, Time expiry) {
++		src_ = src;
++		dest_ = dest;
++		expiry_ = expiry;
++		next_ = NULL;
++	}
++};
++class SentQueryList
++{
++  public:
++	// Data...
++	SentQuery *head_;
++	int numQueries_;
++
++	// Constructors...
++	SentQueryList() : head_(NULL), numQueries_(0) {}
++	
++	// Methods...
++	void addQuery(nsaddr_t src, nsaddr_t dest, Time expiry);
++	int findQuery(nsaddr_t src, nsaddr_t dest, SentQuery **handle);
++	void removeQuery(nsaddr_t src, nsaddr_t dest);
++	void purgeExpiredQueries();
++	void freeList();
++};
++
++/* [SUB-SECTION-4.4]------------------------------------------------------------
++ * EXPIRATION-CHECK TIMER:- FOR EXPIRATION OF IERP-REQUESTS
++ * -----------------------------------------------------------------------------
++ */
++ class IERPExpirationTimer : public Handler
++{
++  public:	
++	// Data...
++  	ZRPAgent *agent_;	// Pointer to ZRP-Agent
++  	Event intr_;
++	int expiration_check_period_;
++	
++	// Constructor...
++	IERPExpirationTimer(ZRPAgent* agent) : agent_(agent),
++		expiration_check_period_(DEFAULT_EXPIRATION_CHECK_PERIOD) {}
++
++	// Methods...
++  	void handle(Event*);  // function handling the event
++  	void start(double thistime);
++};
++ 
++/* [SUB-SECTION-4.5]------------------------------------------------------------
++ * IERP AGENT:- INTER-ZONE ROUTING AGENT
++ * -----------------------------------------------------------------------------
++ */
++class IERPAgent
++{
++  private:	
++	void addMyAddressToRoute(Packet *pold, Packet *pnew);
++	void markCoveredPN(DetectedQuery *queryInCache, nsaddr_t lastBC);
++  public:
++	// Data...
++	ZRPAgent *agent_;
++	int brpXmitPolicy_;
++
++	// Lists...
++	DetectedQueryList dqLst_;
++	SentQueryList sqLst_;
++	int queryLifeTime_;	// DEFAULT_QUERY_LIFETIME
++	int routeLifeTime_;	// DEFAULT_ROUTE_LIFETIME
++	int queryRetryTime_;	// DEFAULT_QUERY_RETRY_TIME
++
++	// Timers...
++	IERPExpirationTimer ExpirationTimer_; 
++	int startup_jitter_;	// For starting the Timers
++	
++	// Constructors...
++	IERPAgent(ZRPAgent *agent) : agent_(agent), 
++		brpXmitPolicy_(DEFAULT_BRP_XMIT_POLICY), 
++		queryLifeTime_(DEFAULT_QUERY_LIFETIME), 
++		routeLifeTime_(DEFAULT_ROUTE_LIFETIME), 	
++		queryRetryTime_(DEFAULT_QUERY_RETRY_TIME),
++		ExpirationTimer_(agent), 
++		startup_jitter_(DEFAULT_STARTUP_JITTER) {}
++
++	// Methods...
++	void startUp();
++	void recv_IERP_ROUTE_REQUEST_UNI(Packet* p);
++	void recv_IERP_ROUTE_REQUEST_MC(Packet* p);
++	void recv_IERP_ROUTE_REPLY(Packet* p);
++	void recv_IERP_ROUTE_ERROR(Packet* p);
++	void recv_IERP_DATA(Packet* p);
++	int addLinkStateFromRoute(nsaddr_t *route, int size);
++	int removeLinkStateFromBrokenRoute(nsaddr_t lnkSrc, nsaddr_t lnkDest);
++	void print_tables();
++};
++
++
++
++
++
++/* [SECTION-5]------------------------------------------------------------------
++ * ZRP (ZONE ROUTING PROTOCOL):- SUBSECTIONS CONTAINS FOLLOWING THINGS:
++ *	1) ZRP HEADER STRUCTURE
++ *	2) PACKET UTILITIES CLASS	(Packet Related Utilities)
++ *	3) SEND BUFFER			(Buffer to store un-delivered Upper-layer Packets)
++ *	4) ZRP AGENT			(Zone Routing Agent)
++ * -----------------------------------------------------------------------------
++ * [SUB-SECTION-5.1]------------------------------------------------------------
++ * ZRP HEADER STRUCTURE:-
++ * -----------------------------------------------------------------------------
++ */
++class LSU;	// Pre-Declaration
++struct hdr_zrp {
++	// Common Attributes to All packets... [Default Size = 10 bytes]
++  	int zrptype_;     	// Packet type					[1 byte]
++  	Time pktsent_;		// Packet Sending time				[Logically not sent]
++	int radius_;		// Sender's Zone Radius (Maybe Useful in Future)[Not Used]
++	int seq_;     		// Sequence number of a packet			[1 byte]
++	nsaddr_t src_;		// 32-bit Address				[4 bytes]
++	nsaddr_t dest_;		// 32-bit Address				[4 bytes]
++
++	// IARP Specific...			[IARP size = 2 + 5*links]
++	int forwarded_;  	// TRUE if forwarded before			[1 byte]
++	LSU *links_;  		// pointer to link state list 			[5 bytes per link - address(4) + link(1)]
++    	int numlinks_;		// Number of links in packet			[1 byte]
++						
++	// IERP Specific...			[IERP size (for REQUEST) = 7 + 4*routelength]
++	//					[	(for REPLY) = 3 + 4*routelength]
++	//					[	(for ERROR) = 2 + 5(for link info) + 4*routelength] 
++	//					[	(for DATA) = 2 + 4*routelength]
++	nsaddr_t *mcLst_;	// List of addresses to relay(Multicast) the	[Not Used]
++				// route-request query
++	int mcLstSize_;		// Size of above list				[Not Used]
++	nsaddr_t lastbc_;	// 32-bit Address [Not Used much]		[REQUEST - 4 bytes]
++	nsaddr_t *route_; 	// pointer to route list data			[REQUEST/REPLY/ERROR/DATA 4 bytes per address]
++	int routelength_;	// Route Length of IERP route stored in route_	[REQUEST/REPLY/ERROR/DATA 1 byte]
++  	int routeindex_;  	// Pointer to a current route node in route_	[REQUEST/REPLY/ERROR/DATA 1 byte]
++	int queryID_;  		// IERP query id counter			[REQUEST/REPLY 1 byte]
++
++  	// this is where the original data for upper layer pkts
++  	// is saved while ZRP routes pkt, at dest this is placed
++  	// back into hdrip->dport(), ie this is part of encapsulated data
++  	int enc_dport_;
++  	int enc_daddr_;
++  	packet_t enc_ptype_;
++
++	// Calculate the size of the header
++	inline int size() {
++		int s=0;
++		switch(zrptype_) {
++			case NDP_BEACON:
++				s = ZRP_DEFAULT_HDR_LEN;
++			break;
++			case NDP_BEACON_ACK:
++				s = ZRP_DEFAULT_HDR_LEN;
++			break;
++			case IARP_UPDATE:
++				s = ZRP_DEFAULT_HDR_LEN + 2 + 5*numlinks_;
++			break;
++			case IERP_REPLY:
++				s = ZRP_DEFAULT_HDR_LEN + 3 + 4*routelength_;
++			break;
++			case IERP_REQUEST:
++				s = ZRP_DEFAULT_HDR_LEN + 7 + 4*routelength_;
++			break;
++			case IERP_ROUTE_ERROR:
++				s = ZRP_DEFAULT_HDR_LEN + 7 + 4*routelength_;
++			break;
++			case IARP_DATA:
++			case IERP_DATA:
++				s = ZRP_DEFAULT_HDR_LEN + 2 + 4*routelength_;
++			break;
++		}
++		return s;
++	}
++  
++  	// Packet header access functions
++  	static int offset_;
++  	inline static int& offset() { return offset_; }
++  	inline static hdr_zrp* access(const Packet* p) {
++    		return (hdr_zrp*) p->access(offset_);
++  	}
++};
++class LSU
++{
++  public:	
++	nsaddr_t src_;
++	nsaddr_t dest_;
++	int isUp_;
++
++	// Constructors...
++	LSU() : src_(-1), dest_(-1), isUp_(LINKDOWN) {}	// Invalid Entries...
++	LSU(nsaddr_t src, nsaddr_t dest, int isUp) : src_(src), dest_(dest),
++	    isUp_(isUp) {}
++};
++
++ /* [SUB-SECTION-5.2]------------------------------------------------------------
++ * PACKET UTILITIES CLASS:- PACKET RELATED UTILITIES
++ * -----------------------------------------------------------------------------
++ */
++class PacketUtil
++{
++  public:
++	// Data...
++	int seq_;
++	ZRPAgent *agent_;
++	int startup_jitter_;
++
++	PacketUtil(ZRPAgent *agent) : seq_(0), agent_(agent),
++		startup_jitter_(DEFAULT_STARTUP_JITTER) {}
++
++	// Methods...
++	Packet* pkt_create(ZRPTYPE zrp_type, nsaddr_t addressee, int ttl); 
++  	void pkt_copy(Packet *pfrom, Packet *pto);
++	void inc_seq() { seq_++; if (seq_ > MAX_SEQUENCE_ID) seq_ = 1;}
++	void pkt_send(Packet *p, nsaddr_t addressee, Time delay);
++	void pkt_broadcast(Packet *p, Time randomJitter);
++	void pkt_add_LSU_space(Packet *p, int size);
++	void pkt_free_LSU_space(Packet *p);
++	void pkt_add_ROUTE_space(Packet *p, int size);
++	void pkt_free_ROUTE_space(Packet *p);
++	void pkt_add_ADDRESS_space(Packet *p, int size);
++	void pkt_free_ADDRESS_space(Packet *p);
++	int pkt_AmIMultiCastReciver(Packet *p, nsaddr_t addressToCheck);
++	int pkt_AmIOnTheRoute(Packet *p, nsaddr_t addressToCheck);
++	void pkt_print_links(Packet *p);
++	void pkt_print_route(Packet *p);
++	void pkt_drop(Packet *p);
++};
++ 
++/* [SUB-SECTION-5.3]------------------------------------------------------------
++ * SEND BUFFER:- BUFFER TO STORE UN-DELIVERED UPPER-LAYER PACKETS
++ * -----------------------------------------------------------------------------
++ */
++class SendBufferEntry
++{
++  public:
++	Packet *pkt_;		// Packet to Send from Upper-Layer
++	nsaddr_t dest_; 	// Address of Destination
++	Time expiry_;		// Time to expire the packet
++	SendBufferEntry *next_;	// Link to next entry in the list
++
++	SendBufferEntry() : pkt_(NULL), dest_(-1), expiry_(0.00), next_(NULL) {}
++	SendBufferEntry(Packet *pkt, nsaddr_t dest, Time expiry) : pkt_(pkt), 
++		dest_(dest), expiry_(expiry), next_(NULL) {}
++};
++
++class SendBuffer
++{
++  public:
++	ZRPAgent *agent_;
++	SendBufferEntry *head_;
++	int numPackets_;
++
++	SendBuffer(ZRPAgent *agent) : agent_(agent), head_(NULL), numPackets_(0) {}
++
++	// Methods...
++	void addPacket(Packet *pkt, nsaddr_t dest, Time expiry);
++	void purgeExpiredPackets();
++	void freeList();
++};
++
++
++/* [SUB-SECTION-5.4]------------------------------------------------------------
++ * ZRP AGENT:- ZONE ROUTING AGENT
++ * -----------------------------------------------------------------------------
++ */
++class ZRPAgent : public Agent {
++ public:
++	// Tcl Related...
++	char*  myid_;   	// (char *)myid_ is string equiv of (int)myaddr_
++	PriQueue* ll_queue;
++	Trace* tracetarget;
++	MobileNode* node_;
++	NsObject* port_dmux_;
++
++	// Common Data...
++	nsaddr_t myaddr_;	// My-own-address
++	int radius_;   		// Zone-Radius
++	int tx_; 		// total pkts transmitted by agent
++	int rx_; 		// total pkts received by agent
++	int queryID_;		// IERP query IDs
++
++	// General Objects...
++	SendBuffer sendBuf_;
++	PacketUtil pktUtil_;
++	NDPAgent ndpAgt_;
++	IARPAgent iarpAgt_;
++	IERPAgent ierpAgt_;
++
++	// Constructors...
++	ZRPAgent(); 		// Default Constructor - (1)
++	ZRPAgent(nsaddr_t id);	// Parameterized Constructor - (2)
++
++	// Methods...
++		// 1. General...
++		void startUp();
++		int  command (int argc, const char*const* argv);
++		void recv(Packet * p, Handler *);
++		void route_pkt(Packet* p, nsaddr_t dest);
++		void route_SendBuffer_pkt();
++		void sendPacketUsingIARPRoute(Packet *p, nsaddr_t dest, Time delay);
++		int  initialized() { return 1 && target_; }
++		void print_tables();
++
++		// 2. Mac Failed...
++		void mac_failed(Packet *p);
++	
++		// 3. Methods for Packet Handling
++		Packet* Myallocpkt() {
++			Packet *p = allocpkt(); 	// fresh new packet
++			return (p);
++		}
++		void Mydrop(Packet *p, const char *s) {
++			 drop(p, s);
++		}
++		void XmitPacket(Packet *p, Time randomJitter) {
++			Scheduler & s = Scheduler::instance();
++		  	s.schedule(target_, p, randomJitter);
++		}
++};
++
++#endif
