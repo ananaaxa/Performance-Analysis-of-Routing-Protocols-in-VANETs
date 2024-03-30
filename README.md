@@ -15,3 +15,6 @@ A .osm file should be downloaded.
 
 ## ZRP and LAR patch
 These hybrid protocols are not inbuilt in the NS2 module. The patch has to be manually downloaded. 
+# ZRP
+```cd ns-allinone-2.35/```
+```patch -p0 < zrp-ns235.patch```
