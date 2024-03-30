@@ -40,6 +40,6 @@ cp ns ns235-lar
 sudo cp ns235-lar /usr/local/bin/
 ```
 
-#Protocols Execution
-1) AODV
+# Protocols Execution
+Follow the ReadME in each protocol respective files.
    
