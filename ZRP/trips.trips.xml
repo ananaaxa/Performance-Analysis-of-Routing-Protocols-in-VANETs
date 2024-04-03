@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2023-12-13 08:18:00.821012 by randomTrips.py v1_19_0+0281-58a094b3dd6
+<configuration>
+    <end value="30.0"/>
+    <length value="True"/>
+    <net-file value="ghaziabad.net.xml"/>
+    <route-file value="ghaziabad.rou.xml"/>
+</configuration>
+-->
+
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+    <trip id="0" depart="0.00" from="615343977" to="-1070264414"/>
+    <trip id="1" depart="1.00" from="44365884#3" to="44365884#2"/>
+    <trip id="2" depart="2.00" from="615343981" to="615343970"/>
+    <trip id="3" depart="3.00" from="70214405#3" to="-615343967"/>
+    <trip id="4" depart="4.00" from="492987609#0" to="-1070264416#0"/>
+    <trip id="5" depart="5.00" from="1070264414" to="492987608#2"/>
+    <trip id="6" depart="6.00" from="-1070264416#2" to="1070272157"/>
+    <trip id="7" depart="7.00" from="615343977" to="556969394#0"/>
+    <trip id="8" depart="8.00" from="1070264414" to="556969394#4"/>
+    <trip id="9" depart="9.00" from="70214405#0" to="-1070264410#0"/>
+    <trip id="10" depart="10.00" from="70214405#0" to="615343975"/>
+    <trip id="11" depart="11.00" from="492987592#1" to="1070269121"/>
+    <trip id="12" depart="12.00" from="955937528" to="44365884#4"/>
+    <trip id="13" depart="13.00" from="-1070272157" to="1070264410#0"/>
+    <trip id="14" depart="14.00" from="70214405#0" to="615343960"/>
+    <trip id="15" depart="15.00" from="70214405#0" to="615343976"/>
+    <trip id="16" depart="16.00" from="615343960" to="955937522"/>
+    <trip id="17" depart="17.00" from="492987601#1" to="556969394#1"/>
+    <trip id="18" depart="18.00" from="70214405#0" to="615343961#0"/>
+    <trip id="19" depart="19.00" from="70214405#0" to="556969394#4"/>
+    <trip id="20" depart="20.00" from="615343980" to="-556969394#0"/>
+    <trip id="21" depart="21.00" from="1070264416#1" to="44365884#4"/>
+    <trip id="22" depart="22.00" from="-1070269121" to="44365884#3"/>
+    <trip id="23" depart="23.00" from="-1070272157" to="44365884#4"/>
+    <trip id="24" depart="24.00" from="615343977" to="492987569#1"/>
+    <trip id="25" depart="25.00" from="492987601#0" to="44365884#0"/>
+    <trip id="26" depart="26.00" from="44365884#2" to="955937522"/>
+    <trip id="27" depart="27.00" from="615343977" to="615343961#0"/>
+    <trip id="28" depart="28.00" from="-615343967" to="615343976"/>
+    <trip id="29" depart="29.00" from="-556969394#4" to="492987592#1"/>
+</routes>

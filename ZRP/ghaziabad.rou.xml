@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2023-12-13 08:18:01.355817 by randomTrips.py v1_19_0+0281-58a094b3dd6
+<configuration>
+    <end value="30.0"/>
+    <length value="True"/>
+    <net-file value="ghaziabad.net.xml"/>
+    <route-file value="ghaziabad.rou.xml"/>
+</configuration>
+-->
+
+<!-- generated on 2023-12-13 08:18:01 by Eclipse SUMO duarouter Version v1_19_0+0281-58a094b3dd6
+<configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/duarouterConfiguration.xsd">
+
+    <input>
+        <net-file value="ghaziabad.net.xml"/>
+        <route-files value="trips.trips.xml"/>
+    </input>
+
+    <output>
+        <output-file value="ghaziabad.rou.xml"/>
+        <alternatives-output value="NUL"/>
+    </output>
+
+    <time>
+        <begin value="0"/>
+        <end value="30.0"/>
+    </time>
+
+    <report>
+        <no-warnings value="true"/>
+        <ignore-errors value="true"/>
+        <no-step-log value="true"/>
+    </report>
+
+</configuration>
+-->
+
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+    <vehicle id="2" depart="2.00">
+        <route edges="615343981 492987592#2 492987529 492987569#0 615343976 70214405#3 70214405#4 615343969 615343970"/>
+    </vehicle>
+    <vehicle id="3" depart="3.00">
+        <route edges="70214405#3 70214405#4 615343969 615343967 615343966 615343968 -615343968 -615343966 -615343967"/>
+    </vehicle>
+    <vehicle id="8" depart="8.00">
+        <route edges="1070264414 1070264416#2 556969394#4"/>
+    </vehicle>
+    <vehicle id="10" depart="10.00">
+        <route edges="70214405#0 615343975"/>
+    </vehicle>
+    <vehicle id="12" depart="12.00">
+        <route edges="955937528 492987609#1 492987609#2 492987609#3 44365884#0 44365884#1 44365884#2 44365884#3 44365884#4"/>
+    </vehicle>
+    <vehicle id="15" depart="15.00">
+        <route edges="70214405#0 70214405#1 70214405#2 70214405#3 615343977 492987594#1 492987428 492987601#0 615343980 44365884#2 615343981 492987592#2 492987529 492987569#0 615343976"/>
+    </vehicle>
+    <vehicle id="21" depart="21.00">
+        <route edges="1070264416#1 -1070264416#1 1070264408 -1070264411#2 -1070264411#1 -1070264411#0 -556969394#0 615343961#1 44365884#4"/>
+    </vehicle>
+    <vehicle id="22" depart="22.00">
+        <route edges="-1070269121 492987609#3 44365884#0 44365884#1 44365884#2 44365884#3"/>
+    </vehicle>
+    <vehicle id="24" depart="24.00">
+        <route edges="615343977 492987594#1 492987428 492987601#0 615343980 44365884#2 615343981 492987592#2 492987529 492987569#0 492987569#1"/>
+    </vehicle>
+    <vehicle id="26" depart="26.00">
+        <route edges="44365884#2 615343981 492987592#2 492987529 492987569#0 615343976 70214405#3 70214405#4 70214405#5 70214405#6 492987608#0 492987608#1 955937522"/>
+    </vehicle>
+</routes>
