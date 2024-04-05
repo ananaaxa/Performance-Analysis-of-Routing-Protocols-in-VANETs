@@ -53,6 +53,11 @@ sumo-gui ghaziabad.sumo
 ```
 nam ghaziabad.nam
 ```
+## Performance Analysis
+```
+python3 analyseTrace.py
+```
+
 # Future Work
 Although this project provides valuable insights into performance of these protocols through simulation based studies, it is crucial to understand the gap between simulation results and real-world implementations. <br/> There should be a focus on challenges that arise when implementing a physical network, particularly in regions with budget constraints, since, simulations may not accurately replicate the dynamic nature of real-world environments, which encompass unpredictable weather conditions, road constructions, and various other external
 factors. It would be beneficial to explore how these factors impact VANET communication and the adaptability of protocols in the face of such challenges, thereby enhancing the practical relevance of the paper. While security and privacy concerns are of utmost importance in real-world VANETs, simulations often fail to fully explore these aspects. Researchers must investigate how the studied protocols perform in scenarios where environmental factors and network conditions fluctuate, ensuring their practical applicability in dynamic environments.
